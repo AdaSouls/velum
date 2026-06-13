@@ -1,0 +1,24 @@
+{
+  "extern_funcs": {
+    "pub_fetch": { "inputs": 0, "outputs": 1, "public": true },
+    "priv_fetch": { "inputs": 0, "outputs": 1, "public": false }
+  },
+  "inputs": 0,
+  "gates": [
+    [ "load_imm", "le_bytes:01" ],
+    [ "load_imm", "le_bytes:70" ],
+    [ "load_imm", "le_bytes:00" ],
+    [ "declare_pub_input", 1 ],
+    [ "declare_pub_input", 0 ],
+    [ "declare_pub_input", 0 ],
+    [ "declare_pub_input", 2 ],
+    [ "pi_skip", 0, 4 ],
+    [ "load_imm", "le_bytes:0E" ],
+    [ "declare_pub_input", 3 ],
+    [ "declare_pub_input", 0 ],
+    [ "pi_skip", 0, 2 ],
+    [ "load_imm", "le_bytes:A1" ],
+    [ "declare_pub_input", 4 ],
+    [ "pi_skip", 0, 1 ]
+  ]
+}

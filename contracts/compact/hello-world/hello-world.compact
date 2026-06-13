@@ -1,0 +1,16 @@
+// Hello-world Compact contract — toolchain verification only.
+// Proves compactc works before touching POAP logic.
+
+include "std";
+
+ledger {
+  greetCount: Counter;
+}
+
+export circuit greet(): Void {
+  ledger.greetCount.increment(1);
+}
+
+export circuit getCount(): Unsigned Integer[64] {
+  return ledger.greetCount as Unsigned Integer[64];
+}

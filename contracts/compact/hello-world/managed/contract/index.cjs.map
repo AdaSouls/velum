@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "file": "index.cjs",
+  "sourceRoot": "../../",
+  "sources": ["hello-world.compact"],
+  "names": [],
+  "mappings": ";;;;;;;;;;;;;;;;;;;;;;;;;EAKA;;;;;;;;MAIA,AAAA,KAEC;;;;;;;;;;;;;;;;;;;;OAAA;MAED,AAAA,QAEC;;;;;;;;;;;;;;;;;;;;OAAA;;;;;;GARA;EAFD;;;;;;;;;;;;;;;;;;;;;IACE;;;;;;;;;;sBAAoB;;;GACrB;EAED,AAAA,SAEC;UADC,GAA8B;IAA9B;;;;;;;;;;;2EAAA,GAA8B;sFAA9B,GAA8B;;;;sBAAA;GAC/B;EAED,AAAA,YAEC;mCADQ;;;;;;;;;;;;;qDAAiB;GACzB;;;;;;;;;;;;;;;;;;;;;;;;;;;;AAVD;;;;;;;;;;;;IACE;qCAAA;;;;;;;;;;;;;uDAAoB;KAAA;;CACrB;;;;;;;;;;"
+}
