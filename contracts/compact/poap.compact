@@ -1,0 +1,178 @@
+include "std";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+struct EventRecord {
+  maxSupply: Unsigned Integer[64];  // 0 = unlimited
+  minted: Unsigned Integer[64];
+  expiration: Unsigned Integer[64]; // Unix timestamp; 0 = no expiration
+  organizer: Bytes[32];             // Public key of the event organizer
+  isActive: Boolean;
+  isPublicMint: Boolean;            // true = any wallet can claim
+}
+
+// ── Public Ledger ─────────────────────────────────────────────────────────────
+// Visible to all observers. Contains only what is strictly necessary for
+// on-chain verification. Attendance history stays in private (client) state.
+
+ledger {
+  totalSupply: Counter;
+
+  // tokenId → owner public key
+  tokenOwner: Map[Unsigned Integer[64], Bytes[32]];
+
+  // tokenId → event it was first minted for
+  tokenFirstEvent: Map[Unsigned Integer[64], Bytes[32]];
+
+  // eventId → event metadata
+  events: Map[Bytes[32], EventRecord];
+
+  // Admin public key — set once at deployment, checked for privileged ops
+  adminPk: Cell[Bytes[32]];
+
+  constructor() {
+    ledger.adminPk = derive_pk(local_sk());
+  }
+}
+
+// ── Witnesses ─────────────────────────────────────────────────────────────────
+// These are client-side functions. The wallet provides these values when
+// constructing a ZK proof. Private state (token IDs, attendance history,
+// soulbound status) lives in the wallet, not on-chain.
+
+// Current user's secret key — always required
+witness local_sk(): Bytes[32];
+
+// Returns the user's token ID if they already own one, none otherwise
+witness get_my_token(): Maybe[Unsigned Integer[64]];
+
+// Called after a successful mint to persist the new token client-side
+witness store_token(tokenId: Unsigned Integer[64], eventId: Bytes[32], isSoulbound: Boolean): Void;
+
+// Called after a successful update to persist the new attendance record client-side
+witness store_attendance(tokenId: Unsigned Integer[64], eventId: Bytes[32]): Void;
+
+// ── Internal Helpers ──────────────────────────────────────────────────────────
+
+circuit derive_pk(sk: Bytes[32]): Bytes[32] {
+  return persistent_hash(pad(32, "adasouls:pk:v1:"), sk);
+}
+
+circuit caller_pk(): Bytes[32] {
+  return derive_pk(local_sk());
+}
+
+circuit is_admin(): Boolean {
+  return ledger.adminPk == caller_pk();
+}
+
+// ── Circuits ──────────────────────────────────────────────────────────────────
+
+// FR-001: Create an event. Admin-only.
+// maxSupply = 0 means unlimited; expiration = 0 means no expiration.
+export circuit createEvent(
+  eventId: Bytes[32],
+  maxSupply: Unsigned Integer[64],
+  expiration: Unsigned Integer[64],
+  isPublicMint: Boolean
+): Void {
+  assert is_admin() "Only admin can create events";
+  assert !ledger.events.member(eventId) "Event already exists";
+
+  const ev = new EventRecord(
+    maxSupply,
+    0 as Unsigned Integer[64],
+    expiration,
+    caller_pk(),
+    true,
+    isPublicMint
+  );
+  ledger.events.insert(eventId, ev);
+}
+
+// Deactivate an event. Admin-only.
+export circuit deactivateEvent(eventId: Bytes[32]): Void {
+  assert is_admin() "Only admin can deactivate events";
+  assert ledger.events.member(eventId) "Event does not exist";
+  const ev = ledger.events.lookup(eventId);
+  const updated = new EventRecord(
+    ev.maxSupply,
+    ev.minted,
+    ev.expiration,
+    ev.organizer,
+    false,
+    ev.isPublicMint
+  );
+  ledger.events.insert(eventId, updated);
+}
+
+// FR-002: Mint a new token for the caller.
+// Called internally by claimOrUpdate when caller has no token yet.
+circuit mintToken(eventId: Bytes[32], isSoulbound: Boolean): Void {
+  assert ledger.events.member(eventId) "Event does not exist";
+  const ev = ledger.events.lookup(eventId);
+
+  assert ev.isActive "Event is not active";
+  assert ev.isPublicMint "Event requires organizer to mint";
+
+  // maxSupply == 0 means unlimited
+  assert ev.maxSupply == 0 as Unsigned Integer[64] || ev.minted < ev.maxSupply
+    "Event has reached maximum supply";
+
+  // expiration == 0 means no expiration — caller provides current time via witness
+  // (expiration enforcement delegated to app layer for MVP; on-chain check omitted
+  //  because Compact 0.5.0 has no block timestamp primitive)
+
+  const tokenId = ledger.totalSupply as Unsigned Integer[64];
+  const pk = caller_pk();
+
+  ledger.totalSupply.increment(1);
+  ledger.tokenOwner.insert(tokenId, pk);
+  ledger.tokenFirstEvent.insert(tokenId, eventId);
+
+  // Increment event's minted counter (copy-update-replace pattern)
+  const updatedEv = new EventRecord(
+    ev.maxSupply,
+    (ev.minted + 1 as Unsigned Integer[64]),
+    ev.expiration,
+    ev.organizer,
+    ev.isActive,
+    ev.isPublicMint
+  );
+  ledger.events.insert(eventId, updatedEv);
+
+  // Persist token data to private (client-side) state
+  store_token(tokenId, eventId, isSoulbound);
+}
+
+// FR-003: Update an existing token with a new event attendance.
+// Called internally by claimOrUpdate when caller already has a token.
+circuit updateToken(tokenId: Unsigned Integer[64], eventId: Bytes[32]): Void {
+  assert ledger.events.member(eventId) "Event does not exist";
+  const ev = ledger.events.lookup(eventId);
+  assert ev.isActive "Event is not active";
+
+  // Verify caller owns this token
+  assert ledger.tokenOwner.member(tokenId) "Token does not exist";
+  assert ledger.tokenOwner.lookup(tokenId) == caller_pk() "Caller does not own this token";
+
+  // Persist the new attendance record to private (client-side) state
+  store_attendance(tokenId, eventId);
+}
+
+// FR-003: Unified claim entry point.
+// If the caller already owns a token: record the new event attendance (update).
+// If not: mint a new token.
+export circuit claimOrUpdate(eventId: Bytes[32], isSoulbound: Boolean): Void {
+  const maybeToken = get_my_token();
+  if (maybeToken.is_some) {
+    updateToken(maybeToken.value, eventId);
+  } else {
+    mintToken(eventId, isSoulbound);
+  }
+}
+
+// Read the caller's public key (for frontend display / identity)
+export circuit getCallerPk(): Bytes[32] {
+  return caller_pk();
+}
