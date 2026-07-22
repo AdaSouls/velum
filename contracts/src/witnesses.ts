@@ -1,25 +1,29 @@
 import type { WitnessContext } from '@midnight-ntwrk/compact-runtime';
-import type { Ledger, Witnesses } from './managed/poap/contract/index.cjs';
+import type { Ledger, Witnesses } from './managed/poap/contract/index.js';
 
 // ── Private State ─────────────────────────────────────────────────────────────
-// Stored client-side (in wallet). Never sent to the public chain.
 
 export type AttendanceRecord = {
   eventIds: Uint8Array[];
   isSoulbound: boolean;
 };
 
-export type PoapPrivateState = {
-  secretKey: Uint8Array;
-  // tokenId → attendance record (undefined if no token yet)
-  token?: {
-    tokenId: bigint;
-    attendance: AttendanceRecord;
-  };
+export type TokenRecord = {
+  tokenId: bigint;
+  attendance: AttendanceRecord;
 };
 
+export type PoapPrivateState = {
+  secretKey: Uint8Array;
+  // issuerId (hex) → token for that issuer; one token per (wallet, issuer)
+  tokens: Record<string, TokenRecord>;
+};
+
+function issuerKey(issuerId: Uint8Array): string {
+  return Buffer.from(issuerId).toString('hex');
+}
+
 // ── Witness Factory ───────────────────────────────────────────────────────────
-// Creates the witness functions for a given private state.
 
 export function createWitnesses(secretKey: Uint8Array): Witnesses<PoapPrivateState> {
   return {
@@ -27,10 +31,11 @@ export function createWitnesses(secretKey: Uint8Array): Witnesses<PoapPrivateSta
       return [context.privateState, secretKey];
     },
 
-    get_my_token(
+    get_my_token_for_issuer(
       context: WitnessContext<Ledger, PoapPrivateState>,
+      issuerId: Uint8Array,
     ): [PoapPrivateState, { is_some: boolean; value: bigint }] {
-      const { token } = context.privateState;
+      const token = context.privateState.tokens[issuerKey(issuerId)];
       if (token !== undefined) {
         return [context.privateState, { is_some: true, value: token.tokenId }];
       }
@@ -40,43 +45,59 @@ export function createWitnesses(secretKey: Uint8Array): Witnesses<PoapPrivateSta
     store_token(
       context: WitnessContext<Ledger, PoapPrivateState>,
       tokenId: bigint,
+      issuerId: Uint8Array,
       eventId: Uint8Array,
       isSoulbound: boolean,
-    ): [PoapPrivateState, void] {
+    ): [PoapPrivateState, []] {
       const newState: PoapPrivateState = {
         ...context.privateState,
-        token: {
-          tokenId,
-          attendance: {
-            eventIds: [eventId],
-            isSoulbound,
+        tokens: {
+          ...context.privateState.tokens,
+          [issuerKey(issuerId)]: {
+            tokenId,
+            attendance: { eventIds: [eventId], isSoulbound },
           },
         },
       };
-      return [newState, undefined];
+      return [newState, []];
     },
 
     store_attendance(
       context: WitnessContext<Ledger, PoapPrivateState>,
       _tokenId: bigint,
+      issuerId: Uint8Array,
       eventId: Uint8Array,
-    ): [PoapPrivateState, void] {
-      const existing = context.privateState.token;
-      if (existing === undefined) {
-        // Should not happen — updateToken checks ownership first
-        return [context.privateState, undefined];
-      }
+    ): [PoapPrivateState, []] {
+      const key = issuerKey(issuerId);
+      const existing = context.privateState.tokens[key];
+      if (existing === undefined) return [context.privateState, []];
       const newState: PoapPrivateState = {
         ...context.privateState,
-        token: {
-          ...existing,
-          attendance: {
-            ...existing.attendance,
-            eventIds: [...existing.attendance.eventIds, eventId],
+        tokens: {
+          ...context.privateState.tokens,
+          [key]: {
+            ...existing,
+            attendance: {
+              ...existing.attendance,
+              eventIds: [...existing.attendance.eventIds, eventId],
+            },
           },
         },
       };
-      return [newState, undefined];
+      return [newState, []];
+    },
+
+    has_attended(
+      context: WitnessContext<Ledger, PoapPrivateState>,
+      issuerId: Uint8Array,
+      eventId: Uint8Array,
+    ): [PoapPrivateState, boolean] {
+      const token = context.privateState.tokens[issuerKey(issuerId)];
+      if (token === undefined) return [context.privateState, false];
+      const attended = token.attendance.eventIds.some(
+        (id) => id.length === eventId.length && id.every((b, i) => b === eventId[i]),
+      );
+      return [context.privateState, attended];
     },
   };
 }

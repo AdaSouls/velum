@@ -1,0 +1,31 @@
+{
+  "name": "@adasouls/poap-indexer",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/index.ts",
+    "dev": "npx tsx --watch src/index.ts",
+    "test": "npx vitest run"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.6.13",
+    "@midnight-ntwrk/ledger": "2.0.8",
+    "@midnight-ntwrk/midnight-js-network-id": "0.1.15",
+    "@midnight-ntwrk/zswap": "0.3.11",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "graphql": "16.8.1",
+    "graphql-ws": "5.16.0",
+    "pg": "^8.11.3",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.10.9",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
+  }
+}

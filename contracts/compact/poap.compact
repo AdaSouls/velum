@@ -1,178 +1,357 @@
-include "std";
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-struct EventRecord {
-  maxSupply: Unsigned Integer[64];  // 0 = unlimited
-  minted: Unsigned Integer[64];
-  expiration: Unsigned Integer[64]; // Unix timestamp; 0 = no expiration
-  organizer: Bytes[32];             // Public key of the event organizer
-  isActive: Boolean;
-  isPublicMint: Boolean;            // true = any wallet can claim
+export struct EventRecord {
+  maxSupply: Uint<64>,
+  minted: Uint<64>,
+  expiration: Uint<64>,
+  organizer: Bytes<32>, // issuer public key that owns this event
+  isActive: Boolean,
+  isPublicMint: Boolean,
+}
+
+export struct IssuerRecord {
+  organizerPk: Bytes<32>,
+  isActive: Boolean,
 }
 
 // ── Public Ledger ─────────────────────────────────────────────────────────────
-// Visible to all observers. Contains only what is strictly necessary for
-// on-chain verification. Attendance history stays in private (client) state.
 
-ledger {
-  totalSupply: Counter;
+export ledger totalSupply: Counter;
 
-  // tokenId → owner public key
-  tokenOwner: Map[Unsigned Integer[64], Bytes[32]];
+// tokenId → owner public key
+export ledger tokenOwner: Map<Uint<64>, Bytes<32>>;
 
-  // tokenId → event it was first minted for
-  tokenFirstEvent: Map[Unsigned Integer[64], Bytes[32]];
+// tokenId → event it was first minted for
+export ledger tokenFirstEvent: Map<Uint<64>, Bytes<32>>;
 
-  // eventId → event metadata
-  events: Map[Bytes[32], EventRecord];
+// tokenId → issuerId (organizer pk) that this token belongs to
+export ledger tokenIssuer: Map<Uint<64>, Bytes<32>>;
 
-  // Admin public key — set once at deployment, checked for privileged ops
-  adminPk: Cell[Bytes[32]];
+// holder_token_key(ownerPk, issuerId) → tokenId. Public index that lets the
+// organizer push-mint to a recipient and lets any wallet reconcile its
+// token for an issuer without relying on a local private-state cache.
+export ledger issuerHolderToken: Map<Bytes<32>, Uint<64>>;
 
-  constructor() {
-    ledger.adminPk = derive_pk(local_sk());
-  }
+// eventId → event metadata
+export ledger events: Map<Bytes<32>, EventRecord>;
+
+// issuerId (organizer pk) → issuer metadata
+export ledger issuers: Map<Bytes<32>, IssuerRecord>;
+
+// tokenId → burned flag (true = burned)
+export ledger burnedTokens: Map<Uint<64>, Boolean>;
+
+// Contract-level pause flag
+export ledger isPaused: Boolean;
+
+// Admin public key — set once at deployment
+export ledger adminPk: Bytes<32>;
+
+constructor() {
+  adminPk = disclose(derive_pk(local_sk()));
+  isPaused = false;
 }
 
 // ── Witnesses ─────────────────────────────────────────────────────────────────
-// These are client-side functions. The wallet provides these values when
-// constructing a ZK proof. Private state (token IDs, attendance history,
-// soulbound status) lives in the wallet, not on-chain.
 
-// Current user's secret key — always required
-witness local_sk(): Bytes[32];
+witness local_sk(): Bytes<32>;
 
-// Returns the user's token ID if they already own one, none otherwise
-witness get_my_token(): Maybe[Unsigned Integer[64]];
+// Returns caller's token for a specific issuer, if they own one
+witness get_my_token_for_issuer(issuerId: Bytes<32>): Maybe<Uint<64>>;
 
-// Called after a successful mint to persist the new token client-side
-witness store_token(tokenId: Unsigned Integer[64], eventId: Bytes[32], isSoulbound: Boolean): Void;
+// Persists a new token to client-side state under the given issuer
+witness store_token(
+          tokenId: Uint<64>,
+          issuerId: Bytes<32>,
+          eventId: Bytes<32>,
+          isSoulbound: Boolean
+          ): [];
 
-// Called after a successful update to persist the new attendance record client-side
-witness store_attendance(tokenId: Unsigned Integer[64], eventId: Bytes[32]): Void;
+// Persists a new attendance record to client-side state under the given issuer
+witness store_attendance(tokenId: Uint<64>, issuerId: Bytes<32>, eventId: Bytes<32>): [];
+
+// Returns true if the caller has already recorded attendance for this issuer+event
+witness has_attended(issuerId: Bytes<32>, eventId: Bytes<32>): Boolean;
 
 // ── Internal Helpers ──────────────────────────────────────────────────────────
 
-circuit derive_pk(sk: Bytes[32]): Bytes[32] {
-  return persistent_hash(pad(32, "adasouls:pk:v1:"), sk);
+circuit derive_pk(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "adasouls:pk:v1:"), sk]);
 }
 
-circuit caller_pk(): Bytes[32] {
-  return derive_pk(local_sk());
+circuit caller_pk(): Bytes<32> {
+  // The derived public key is inherently public in this contract: it is stored
+  // on-chain as a token owner, the admin key, and issuer identifiers. Disclosing
+  // it here reflects that design and covers all downstream uses.
+  return disclose(derive_pk(local_sk()));
+}
+
+// Public-ledger key for the (holder, issuer) → token index. Lets organizer
+// push-minting and self-service reconciliation agree on one token per wallet
+// per issuer without ever touching a wallet's private state.
+circuit holder_token_key(holderPk: Bytes<32>, issuerId: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>(
+           [pad(32, "adasouls:holder-issuer:v1:"),
+            persistentHash<Vector<2, Bytes<32>>>([holderPk, issuerId])]
+           );
 }
 
 circuit is_admin(): Boolean {
-  return ledger.adminPk == caller_pk();
+  return adminPk == caller_pk();
 }
 
-// ── Circuits ──────────────────────────────────────────────────────────────────
+// True if the caller IS the registered, active issuer identified by issuerId.
+// issuerId is the issuer's own public key on Midnight.
+circuit is_active_issuer(issuerId: Bytes<32>): Boolean {
+  if (!issuers.member(issuerId)) {
+    return false;
+  }
+  const issuer = issuers.lookup(issuerId);
+  return issuer.isActive && issuerId == caller_pk();
+}
 
-// FR-001: Create an event. Admin-only.
-// maxSupply = 0 means unlimited; expiration = 0 means no expiration.
+// ── Pause / Unpause ───────────────────────────────────────────────────────────
+
+export circuit pause(): [] {
+  assert(is_admin(), "Only admin can pause");
+  isPaused = true;
+}
+
+export circuit unpause(): [] {
+  assert(is_admin(), "Only admin can unpause");
+  isPaused = false;
+}
+
+// ── Issuer Management ─────────────────────────────────────────────────────────
+
+// Register an issuer by their Midnight public key. Admin-only.
+// After registration the issuer can create and manage their own events.
+export circuit registerIssuer(issuerPk: Bytes<32>): [] {
+  const pk = disclose(issuerPk);
+  assert(!isPaused, "Contract is paused");
+  assert(is_admin(), "Only admin can register issuers");
+  assert(!issuers.member(pk), "Issuer already registered");
+  const issuer = IssuerRecord { organizerPk: pk, isActive: true };
+  issuers.insert(pk, issuer);
+}
+
+// Deactivate an issuer. Admin-only.
+export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
+  const pk = disclose(issuerPk);
+  assert(!isPaused, "Contract is paused");
+  assert(is_admin(), "Only admin can deactivate issuers");
+  assert(issuers.member(pk), "Issuer does not exist");
+  const existing = issuers.lookup(pk);
+  const updated = IssuerRecord { organizerPk: existing.organizerPk, isActive: false };
+  issuers.insert(pk, updated);
+}
+
+// ── Event Management ──────────────────────────────────────────────────────────
+
+// Create an event. Callable by admin or any registered active issuer.
+// The caller's public key becomes the issuerId for this event.
 export circuit createEvent(
-  eventId: Bytes[32],
-  maxSupply: Unsigned Integer[64],
-  expiration: Unsigned Integer[64],
-  isPublicMint: Boolean
-): Void {
-  assert is_admin() "Only admin can create events";
-  assert !ledger.events.member(eventId) "Event already exists";
+                 eventId: Bytes<32>,
+                 maxSupply: Uint<64>,
+                 expiration: Uint<64>,
+                 isPublicMint: Boolean
+                 ): [] {
+  assert(!isPaused, "Contract is paused");
+  const evId = disclose(eventId);
+  const maxS = disclose(maxSupply);
+  const exp = disclose(expiration);
+  const pubMint = disclose(isPublicMint);
+  const issuerId = caller_pk();
+  assert(is_admin() || is_active_issuer(issuerId), "Not authorized to create events");
+  assert(!events.member(evId), "Event already exists");
 
-  const ev = new EventRecord(
-    maxSupply,
-    0 as Unsigned Integer[64],
-    expiration,
-    caller_pk(),
-    true,
-    isPublicMint
-  );
-  ledger.events.insert(eventId, ev);
+  const ev = EventRecord { maxSupply: maxS,
+                           minted: 0 as Uint<64>,
+                           expiration: exp,
+                           organizer: issuerId,
+                           isActive: true,
+                           isPublicMint: pubMint };
+  events.insert(evId, ev);
 }
 
-// Deactivate an event. Admin-only.
-export circuit deactivateEvent(eventId: Bytes[32]): Void {
-  assert is_admin() "Only admin can deactivate events";
-  assert ledger.events.member(eventId) "Event does not exist";
-  const ev = ledger.events.lookup(eventId);
-  const updated = new EventRecord(
-    ev.maxSupply,
-    ev.minted,
-    ev.expiration,
-    ev.organizer,
-    false,
-    ev.isPublicMint
-  );
-  ledger.events.insert(eventId, updated);
+// Deactivate an event. Admin or the event's own organizer.
+export circuit deactivateEvent(eventId: Bytes<32>): [] {
+  const evId = disclose(eventId);
+  assert(!isPaused, "Contract is paused");
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+  assert(is_admin() || ev.organizer == caller_pk(), "Not authorized");
+  const updated = EventRecord { maxSupply: ev.maxSupply,
+                                minted: ev.minted,
+                                expiration: ev.expiration,
+                                organizer: ev.organizer,
+                                isActive: false,
+                                isPublicMint: ev.isPublicMint };
+  events.insert(evId, updated);
 }
 
-// FR-002: Mint a new token for the caller.
-// Called internally by claimOrUpdate when caller has no token yet.
-circuit mintToken(eventId: Bytes[32], isSoulbound: Boolean): Void {
-  assert ledger.events.member(eventId) "Event does not exist";
-  const ev = ledger.events.lookup(eventId);
+// ── Token: Mint (internal) ────────────────────────────────────────────────────
 
-  assert ev.isActive "Event is not active";
-  assert ev.isPublicMint "Event requires organizer to mint";
+circuit mintTokenInternal(issuerId: Bytes<32>, eventId: Bytes<32>, isSoulbound: Boolean): [] {
+  assert(events.member(eventId), "Event does not exist");
+  const ev = events.lookup(eventId);
+  assert(ev.isActive, "Event is not active");
+  assert(ev.isPublicMint, "Event requires organizer to mint");
+  assert(ev.maxSupply == 0 as Uint<64> || ev.minted < ev.maxSupply,
+         "Event has reached maximum supply"
+         );
 
-  // maxSupply == 0 means unlimited
-  assert ev.maxSupply == 0 as Unsigned Integer[64] || ev.minted < ev.maxSupply
-    "Event has reached maximum supply";
-
-  // expiration == 0 means no expiration — caller provides current time via witness
-  // (expiration enforcement delegated to app layer for MVP; on-chain check omitted
-  //  because Compact 0.5.0 has no block timestamp primitive)
-
-  const tokenId = ledger.totalSupply as Unsigned Integer[64];
   const pk = caller_pk();
+  const key = holder_token_key(pk, issuerId);
+  assert(!issuerHolderToken.member(key), "Wallet already has a token for this issuer");
 
-  ledger.totalSupply.increment(1);
-  ledger.tokenOwner.insert(tokenId, pk);
-  ledger.tokenFirstEvent.insert(tokenId, eventId);
+  const tokenId = totalSupply.read();
 
-  // Increment event's minted counter (copy-update-replace pattern)
-  const updatedEv = new EventRecord(
-    ev.maxSupply,
-    (ev.minted + 1 as Unsigned Integer[64]),
-    ev.expiration,
-    ev.organizer,
-    ev.isActive,
-    ev.isPublicMint
-  );
-  ledger.events.insert(eventId, updatedEv);
+  totalSupply.increment(1);
+  tokenOwner.insert(tokenId, pk);
+  tokenFirstEvent.insert(tokenId, eventId);
+  tokenIssuer.insert(tokenId, issuerId);
+  issuerHolderToken.insert(key, tokenId);
 
-  // Persist token data to private (client-side) state
-  store_token(tokenId, eventId, isSoulbound);
+  const updatedEv =
+          EventRecord { maxSupply: ev.maxSupply,
+                        minted: (ev.minted + 1) as Uint<64>,
+                        expiration: ev.expiration,
+                        organizer: ev.organizer,
+                        isActive: ev.isActive,
+                        isPublicMint: ev.isPublicMint };
+  events.insert(eventId, updatedEv);
+
+  store_token(tokenId, issuerId, eventId, isSoulbound);
 }
 
-// FR-003: Update an existing token with a new event attendance.
-// Called internally by claimOrUpdate when caller already has a token.
-circuit updateToken(tokenId: Unsigned Integer[64], eventId: Bytes[32]): Void {
-  assert ledger.events.member(eventId) "Event does not exist";
-  const ev = ledger.events.lookup(eventId);
-  assert ev.isActive "Event is not active";
+// ── Token: Update (internal) ──────────────────────────────────────────────────
 
-  // Verify caller owns this token
-  assert ledger.tokenOwner.member(tokenId) "Token does not exist";
-  assert ledger.tokenOwner.lookup(tokenId) == caller_pk() "Caller does not own this token";
+circuit updateToken(tokenId: Uint<64>, issuerId: Bytes<32>, eventId: Bytes<32>): [] {
+  assert(events.member(eventId), "Event does not exist");
+  const ev = events.lookup(eventId);
+  assert(ev.isActive, "Event is not active");
 
-  // Persist the new attendance record to private (client-side) state
-  store_attendance(tokenId, eventId);
+  assert(tokenOwner.member(tokenId), "Token does not exist");
+  assert(!burnedTokens.member(tokenId), "Token has been burned");
+  assert(tokenOwner.lookup(tokenId) == caller_pk(), "Caller does not own this token");
+  assert(tokenIssuer.lookup(tokenId) == issuerId, "Token belongs to a different issuer");
+  assert(!disclose(has_attended(issuerId, eventId)), "Already attended this event");
+
+  store_attendance(tokenId, issuerId, eventId);
 }
 
-// FR-003: Unified claim entry point.
-// If the caller already owns a token: record the new event attendance (update).
-// If not: mint a new token.
-export circuit claimOrUpdate(eventId: Bytes[32], isSoulbound: Boolean): Void {
-  const maybeToken = get_my_token();
-  if (maybeToken.is_some) {
-    updateToken(maybeToken.value, eventId);
+// ── Token: Reconcile (internal) ───────────────────────────────────────────────
+
+// Backfills a wallet's local cache for a token that already exists on-chain
+// (e.g. minted via mintTo) but isn't in this wallet's private state yet.
+// Kept as its own circuit rather than inlined: compactc 0.10.6 hits an
+// internal compiler error ("failed assertion (fx= (length triv1*)
+// (length triv2*))") when a witness call sits directly inside an if/else
+// branch that is itself nested inside another if/else's else-branch.
+circuit reconcileToken(
+          tokenId: Uint<64>,
+          issuerId: Bytes<32>,
+          eventId: Bytes<32>,
+          isSoulbound: Boolean
+          ): [] {
+  updateToken(tokenId, issuerId, eventId);
+  store_token(tokenId, issuerId, eventId, isSoulbound);
+}
+
+// ── Token: Claim or Update (exported) ────────────────────────────────────────
+
+// Unified entry point. Reads the issuerId from the event's organizer field,
+// then either mints a new token (first claim) or records attendance on the
+// existing token for that issuer (subsequent claims).
+export circuit claimOrUpdate(eventId: Bytes<32>, isSoulbound: Boolean): [] {
+  assert(!isPaused, "Contract is paused");
+  const evId = disclose(eventId);
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+  const issuerId = ev.organizer;
+  const maybeToken = get_my_token_for_issuer(issuerId);
+  if (disclose(maybeToken.is_some)) {
+    updateToken(disclose(maybeToken.value), issuerId, evId);
   } else {
-    mintToken(eventId, isSoulbound);
+    const key = holder_token_key(caller_pk(), issuerId);
+    if (issuerHolderToken.member(key)) {
+      // Token already exists on-chain (e.g. the organizer push-minted it via
+      // mintTo) but this wallet's local cache doesn't know about it yet.
+      // Reconcile instead of minting a second token for the same issuer.
+      const tokenId = issuerHolderToken.lookup(key);
+      reconcileToken(tokenId, issuerId, evId, isSoulbound);
+    } else {
+      mintTokenInternal(issuerId, evId, isSoulbound);
+    }
   }
 }
 
-// Read the caller's public key (for frontend display / identity)
-export circuit getCallerPk(): Bytes[32] {
+// ── Token: Push Mint (organizer-initiated) ───────────────────────────────────
+
+// Mint directly to a recipient's public key. Callable by admin or the
+// event's own organizer. Unlike claimOrUpdate, this never touches private
+// state: the caller proving this transaction is the organizer, not the
+// recipient, so the recipient's local witness cache cannot be written here.
+// The recipient's wallet discovers the token via `issuerHolderToken` the next
+// time it calls claimOrUpdate for this issuer (see the reconciliation branch
+// above) — no separate "accept" step is required.
+export circuit mintTo(eventId: Bytes<32>, recipientPk: Bytes<32>): [] {
+  const evId = disclose(eventId);
+  const recipient = disclose(recipientPk);
+  assert(!isPaused, "Contract is paused");
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+  assert(ev.isActive, "Event is not active");
+  assert(is_admin() || ev.organizer == caller_pk(), "Not authorized to mint for this event");
+  assert(ev.maxSupply == 0 as Uint<64> || ev.minted < ev.maxSupply,
+         "Event has reached maximum supply"
+         );
+
+  const issuerId = ev.organizer;
+  const key = holder_token_key(recipient, issuerId);
+  assert(!issuerHolderToken.member(key), "Recipient already has a token for this issuer");
+
+  const tokenId = totalSupply.read();
+
+  totalSupply.increment(1);
+  tokenOwner.insert(tokenId, recipient);
+  tokenFirstEvent.insert(tokenId, evId);
+  tokenIssuer.insert(tokenId, issuerId);
+  issuerHolderToken.insert(key, tokenId);
+
+  const updatedEv =
+          EventRecord { maxSupply: ev.maxSupply,
+                        minted: (ev.minted + 1) as Uint<64>,
+                        expiration: ev.expiration,
+                        organizer: ev.organizer,
+                        isActive: ev.isActive,
+                        isPublicMint: ev.isPublicMint };
+  events.insert(evId, updatedEv);
+}
+
+// ── Token: Burn ───────────────────────────────────────────────────────────────
+
+// Burn a token. Only the token owner can burn.
+// Note: totalSupply and event minted counters are not decremented (Compact
+// Counter only increments). The token is marked burned on-chain; the owner
+// should clear it from their private state to enable minting a new token
+// for the same issuer.
+export circuit burn(tokenId: Uint<64>): [] {
+  const tId = disclose(tokenId);
+  assert(!isPaused, "Contract is paused");
+  assert(tokenOwner.member(tId), "Token does not exist");
+  assert(!burnedTokens.member(tId), "Token already burned");
+  assert(tokenOwner.lookup(tId) == caller_pk(), "Caller does not own this token");
+  burnedTokens.insert(tId, true);
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+
+export circuit getCallerPk(): Bytes<32> {
   return caller_pk();
 }

@@ -1,0 +1,6 @@
+.env.local
+.env
+*.env
+node_modules/
+.DS_Store
+contracts/src/managed/poap/keys/

@@ -1,11 +1,22 @@
 import { describe, it, expect } from '@jest/globals';
-import { networkId, setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-import { PoapSimulator, ADMIN_SK, USER1_SK, USER2_SK, makeEventId } from './poap-simulator.js';
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+import {
+  PoapSimulator,
+  ADMIN_SK,
+  USER1_SK,
+  USER2_SK,
+  ISSUER1_SK,
+  ISSUER2_SK,
+  makeEventId,
+} from './poap-simulator.js';
 
-setNetworkId(networkId.undeployed);
+setNetworkId('undeployed');
 
 const EVENT_A = makeEventId(1);
 const EVENT_B = makeEventId(2);
+const EVENT_C = makeEventId(3);
+
+// ── createEvent ───────────────────────────────────────────────────────────────
 
 describe('POAP contract — createEvent', () => {
   it('admin can create an event', () => {
@@ -19,10 +30,22 @@ describe('POAP contract — createEvent', () => {
     expect(ev.isPublicMint).toBe(true);
   });
 
-  it('non-admin cannot create an event', () => {
+  it('unregistered address cannot create an event', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     sim.asUser(USER1_SK);
     expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+  });
+
+  it('registered issuer can create an event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 50n, 0n, true);
+
+    const ev = sim.getLedger().events.lookup(EVENT_A);
+    expect(ev.maxSupply).toBe(50n);
+    expect(ev.organizer).toEqual(issuer1Pk);
   });
 
   it('creating the same event twice throws', () => {
@@ -30,12 +53,53 @@ describe('POAP contract — createEvent', () => {
     sim.createEvent(EVENT_A, 100n, 0n, true);
     expect(() => sim.createEvent(EVENT_A, 50n, 0n, true)).toThrow();
   });
+
+  it('deactivated issuer cannot create an event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+
+    sim.asUser(ISSUER1_SK);
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+  });
 });
+
+// ── Pause / Unpause ───────────────────────────────────────────────────────────
+
+describe('POAP contract — pause / unpause', () => {
+  it('admin can pause and unpause', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.pause();
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+    sim.unpause();
+    // should succeed after unpausing
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).not.toThrow();
+  });
+
+  it('non-admin cannot pause', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.asUser(USER1_SK);
+    expect(() => sim.pause()).toThrow();
+  });
+
+  it('claimOrUpdate is blocked while paused', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    sim.pause();
+    sim.asUser(USER1_SK);
+    expect(() => sim.claimOrUpdate(EVENT_A, false)).toThrow();
+  });
+});
+
+// ── mintToken via claimOrUpdate ───────────────────────────────────────────────
 
 describe('POAP contract — mintToken (via claimOrUpdate)', () => {
   it('new user mints a token and supply increments', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     sim.createEvent(EVENT_A, 100n, 0n, true);
+    const adminPk = sim.getCallerPk();
 
     sim.asUser(USER1_SK);
     const state = sim.claimOrUpdate(EVENT_A, false);
@@ -46,10 +110,11 @@ describe('POAP contract — mintToken (via claimOrUpdate)', () => {
     expect(state.events.lookup(EVENT_A).minted).toBe(1n);
 
     const ps = sim.getPrivateState();
-    expect(ps.token).toBeDefined();
-    expect(ps.token!.tokenId).toBe(0n);
-    expect(ps.token!.attendance.eventIds).toHaveLength(1);
-    expect(ps.token!.attendance.isSoulbound).toBe(false);
+    const adminPkHex = Buffer.from(adminPk).toString('hex');
+    expect(ps.tokens[adminPkHex]).toBeDefined();
+    expect(ps.tokens[adminPkHex].tokenId).toBe(0n);
+    expect(ps.tokens[adminPkHex].attendance.eventIds).toHaveLength(1);
+    expect(ps.tokens[adminPkHex].attendance.isSoulbound).toBe(false);
   });
 
   it('second claim on different event updates token without new mint', () => {
@@ -61,15 +126,24 @@ describe('POAP contract — mintToken (via claimOrUpdate)', () => {
     sim.claimOrUpdate(EVENT_A, false);
     const supplyAfterMint = sim.getLedger().totalSupply;
 
-    // Second claim: should update, not re-mint
     sim.claimOrUpdate(EVENT_B, false);
     const supplyAfterUpdate = sim.getLedger().totalSupply;
 
     expect(supplyAfterMint).toBe(1n);
-    expect(supplyAfterUpdate).toBe(1n); // unchanged
+    expect(supplyAfterUpdate).toBe(1n); // no new token
 
-    const ps = sim.getPrivateState();
-    expect(ps.token!.attendance.eventIds).toHaveLength(2);
+    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
+    sim.asUser(USER1_SK);
+    expect(sim.getPrivateState().tokens[adminPkHex].attendance.eventIds).toHaveLength(2);
+  });
+
+  it('attending the same event twice is rejected', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+
+    sim.asUser(USER1_SK);
+    sim.claimOrUpdate(EVENT_A, false);
+    expect(() => sim.claimOrUpdate(EVENT_A, false)).toThrow();
   });
 
   it('claim fails on inactive event', () => {
@@ -81,13 +155,22 @@ describe('POAP contract — mintToken (via claimOrUpdate)', () => {
     expect(() => sim.claimOrUpdate(EVENT_A, false)).toThrow();
   });
 
+  it('event organizer can deactivate their own event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+
+    // Issuer deactivates their own event
+    sim.deactivateEvent(EVENT_A);
+    expect(sim.getLedger().events.lookup(EVENT_A).isActive).toBe(false);
+  });
+
   it('claim fails when max supply is reached', () => {
     const sim = new PoapSimulator(ADMIN_SK);
-    sim.createEvent(EVENT_A, 1n, 0n, true); // supply = 1
+    sim.createEvent(EVENT_A, 1n, 0n, true);
 
-    sim.asUser(USER1_SK);
-    sim.claimOrUpdate(EVENT_A, false); // token 0 minted
-
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
     sim.asUser(USER2_SK);
     expect(() => sim.claimOrUpdate(EVENT_A, false)).toThrow();
   });
@@ -95,29 +178,246 @@ describe('POAP contract — mintToken (via claimOrUpdate)', () => {
   it('soulbound flag is stored in private state', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     sim.createEvent(EVENT_A, 100n, 0n, true);
+    const adminPkHex = Buffer.from(sim.getCallerPk()).toString('hex');
 
-    sim.asUser(USER1_SK);
-    sim.claimOrUpdate(EVENT_A, true); // soulbound = true
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, true);
 
-    const ps = sim.getPrivateState();
-    expect(ps.token!.attendance.isSoulbound).toBe(true);
+    expect(sim.getPrivateState().tokens[adminPkHex].attendance.isSoulbound).toBe(true);
   });
 
   it('two different users each get their own token', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     sim.createEvent(EVENT_A, 100n, 0n, true);
 
-    sim.asUser(USER1_SK);
-    sim.claimOrUpdate(EVENT_A, false);
-    const user1Ps = sim.getPrivateState();
-    const tokenIdUser1 = user1Ps.token!.tokenId;
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
 
-    sim.asUser(USER2_SK);
-    sim.claimOrUpdate(EVENT_A, false);
-    const user2Ps = sim.getPrivateState();
-    const tokenIdUser2 = user2Ps.token!.tokenId;
+    sim.asUser(USER1_SK);
+    const tokenIdUser1 = sim.getPrivateState().tokens[adminPkHex].tokenId;
+
+    sim.asUser(USER2_SK).claimOrUpdate(EVENT_A, false);
+    const tokenIdUser2 = sim.getPrivateState().tokens[adminPkHex].tokenId;
 
     expect(tokenIdUser1).not.toBe(tokenIdUser2);
     expect(sim.getLedger().totalSupply).toBe(2n);
+  });
+});
+
+// ── mintTo (organizer push-mint) ──────────────────────────────────────────────
+
+describe('POAP contract — mintTo (organizer push-mint)', () => {
+  it('event organizer can push-mint to a recipient', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false); // not public mint
+
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const state = sim.asUser(ISSUER1_SK).mintTo(EVENT_A, user1Pk);
+
+    expect(state.totalSupply).toBe(1n);
+    expect(state.tokenOwner.lookup(0n)).toEqual(user1Pk);
+    expect(state.tokenIssuer.lookup(0n)).toEqual(issuer1Pk);
+    expect(state.events.lookup(EVENT_A).minted).toBe(1n);
+  });
+
+  it('admin can push-mint for any event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    const state = sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
+    expect(state.tokenOwner.lookup(0n)).toEqual(user1Pk);
+  });
+
+  it('push-mint succeeds even though self-service claim is blocked for the same non-public event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    // Self-service claim has no path when isPublicMint is false.
+    expect(() => sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false)).toThrow();
+    // The organizer can still mint it directly.
+    expect(() => sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk)).not.toThrow();
+  });
+
+  it('non-organizer, non-admin cannot push-mint', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user2Pk = sim.asUser(USER2_SK).getCallerPk();
+
+    sim.asUser(USER1_SK);
+    expect(() => sim.mintTo(EVENT_A, user2Pk)).toThrow();
+  });
+
+  it('push-mint fails on inactive event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    sim.deactivateEvent(EVENT_A);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK);
+    expect(() => sim.mintTo(EVENT_A, user1Pk)).toThrow();
+  });
+
+  it('push-mint fails when max supply is reached', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 1n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user2Pk = sim.asUser(USER2_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
+    expect(() => sim.mintTo(EVENT_A, user2Pk)).toThrow();
+  });
+
+  it('push-mint fails if the recipient already has a token for that issuer', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    sim.createEvent(EVENT_B, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
+    expect(() => sim.mintTo(EVENT_B, user1Pk)).toThrow();
+  });
+
+  it('push-minted recipient reconciles on next claimOrUpdate instead of minting a duplicate token', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    sim.createEvent(EVENT_B, 100n, 0n, true);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
+    expect(sim.getLedger().totalSupply).toBe(1n);
+
+    // USER1's wallet has no local record of this token — it was minted by
+    // the organizer, not claimed — so claimOrUpdate must reconcile rather
+    // than mint a second token for the same issuer.
+    const state = sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false);
+    expect(state.totalSupply).toBe(1n);
+    expect(state.tokenOwner.lookup(0n)).toEqual(user1Pk);
+
+    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
+    sim.asUser(USER1_SK);
+    const ps = sim.getPrivateState();
+    expect(ps.tokens[adminPkHex].tokenId).toBe(0n);
+    expect(ps.tokens[adminPkHex].attendance.eventIds).toEqual([EVENT_B]);
+  });
+
+  it('after reconciliation, subsequent claims use the fast private-cache path', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, false);
+    sim.createEvent(EVENT_B, 100n, 0n, true);
+    sim.createEvent(EVENT_C, 100n, 0n, true);
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+
+    sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false); // reconciles
+    const state = sim.claimOrUpdate(EVENT_C, false); // fast path
+
+    expect(state.totalSupply).toBe(1n); // still one token, never re-minted
+    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
+    sim.asUser(USER1_SK);
+    expect(sim.getPrivateState().tokens[adminPkHex].attendance.eventIds).toHaveLength(2);
+  });
+});
+
+// ── Multi-issuer ──────────────────────────────────────────────────────────────
+
+describe('POAP contract — multi-issuer', () => {
+  it('user gets separate tokens for different issuers', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+
+    // Register issuer1 and issuer2
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const issuer2Pk = sim.asUser(ISSUER2_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ADMIN_SK).registerIssuer(issuer2Pk);
+
+    // Each issuer creates an event
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(ISSUER2_SK).createEvent(EVENT_B, 100n, 0n, true);
+
+    // USER1 claims both events
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false);
+
+    const ps = sim.getPrivateState();
+    const issuer1Key = Buffer.from(issuer1Pk).toString('hex');
+    const issuer2Key = Buffer.from(issuer2Pk).toString('hex');
+
+    // Two separate tokens, one per issuer
+    expect(ps.tokens[issuer1Key]).toBeDefined();
+    expect(ps.tokens[issuer2Key]).toBeDefined();
+    expect(ps.tokens[issuer1Key].tokenId).not.toBe(ps.tokens[issuer2Key].tokenId);
+    expect(sim.getLedger().totalSupply).toBe(2n);
+  });
+
+  it('updating issuer1 token does not affect issuer2 token', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const issuer2Pk = sim.asUser(ISSUER2_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ADMIN_SK).registerIssuer(issuer2Pk);
+
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_B, 100n, 0n, true);
+    sim.asUser(ISSUER2_SK).createEvent(EVENT_C, 100n, 0n, true);
+
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false); // mints for issuer1
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_C, false); // mints for issuer2
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false); // updates issuer1 token
+
+    const ps = sim.getPrivateState();
+    const i1 = Buffer.from(issuer1Pk).toString('hex');
+    const i2 = Buffer.from(issuer2Pk).toString('hex');
+
+    expect(ps.tokens[i1].attendance.eventIds).toHaveLength(2);
+    expect(ps.tokens[i2].attendance.eventIds).toHaveLength(1);
+    expect(sim.getLedger().totalSupply).toBe(2n); // still 2 tokens
+  });
+});
+
+// ── Burn ──────────────────────────────────────────────────────────────────────
+
+describe('POAP contract — burn', () => {
+  it('token owner can burn their token', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    sim.burn(0n);
+
+    expect(sim.getLedger().burnedTokens.member(0n)).toBe(true);
+    expect(sim.getLedger().burnedTokens.lookup(0n)).toBe(true);
+  });
+
+  it('non-owner cannot burn a token', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+
+    sim.asUser(USER2_SK);
+    expect(() => sim.burn(0n)).toThrow();
+  });
+
+  it('burning the same token twice throws', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    sim.burn(0n);
+    expect(() => sim.burn(0n)).toThrow();
+  });
+
+  it('cannot update a burned token', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    sim.createEvent(EVENT_B, 100n, 0n, true);
+
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    sim.burn(0n);
+
+    // Tries to update the now-burned token
+    expect(() => sim.claimOrUpdate(EVENT_B, false)).toThrow();
   });
 });

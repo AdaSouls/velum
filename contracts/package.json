@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "compact": "COMPACT_PATH=/Users/<user>/Projects/midnight-network/compactc-macos/lib/ compactc --skip-zk ../contracts/compact/poap.compact src/managed/poap/",
+    "compact": "compact compile +0.31.1 compact/poap.compact src/managed/poap/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

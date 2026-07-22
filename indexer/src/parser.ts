@@ -1,0 +1,116 @@
+/**
+ * Parses the hex-encoded contract state returned by the Midnight Indexer into a
+ * typed ledger object using the compiled Compact contract artifacts.
+ *
+ * The `state` field on ContractCall/ContractDeploy is a hex string.
+ * ContractState.deserialize converts it to an internal ContractState object,
+ * and ledger() (from index.cjs) materialises the typed public-ledger view.
+ */
+
+import { createRequire } from 'node:module';
+import * as compactRuntime from '@midnight-ntwrk/compact-runtime';
+import { config } from './config.js';
+
+const require = createRequire(import.meta.url);
+const { ledger: _ledger } = require(config.contractCjsPath);
+
+export type EventRecord = {
+  maxSupply: bigint;
+  minted: bigint;
+  expiration: bigint;
+  organizer: Uint8Array;
+  isActive: boolean;
+  isPublicMint: boolean;
+};
+
+export type IssuerRecord = {
+  organizerPk: Uint8Array;
+  isActive: boolean;
+};
+
+export type LedgerView = {
+  totalSupply: bigint;
+  tokenOwner:     Iterable<[bigint,    Uint8Array]>;
+  tokenFirstEvent:Iterable<[bigint,    Uint8Array]>;
+  tokenIssuer:    Iterable<[bigint,    Uint8Array]>;
+  events:         Iterable<[Uint8Array, EventRecord]>;
+  issuers:        Iterable<[Uint8Array, IssuerRecord]>;
+  burnedTokens:   Iterable<[bigint,    boolean]>;
+  isPaused: boolean;
+  adminPk: Uint8Array;
+};
+
+export function parseState(stateHex: string): LedgerView {
+  const bytes = Buffer.from(stateHex, 'hex');
+  const cs = (compactRuntime as any).ContractState.deserialize(bytes);
+  return _ledger(cs.data) as LedgerView;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+export function toHex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
+}
+
+export function bigintKey(n: bigint): string {
+  return n.toString();
+}
+
+/** Snapshot a ledger map to a plain JS Map (key-string → value). */
+export function snapshotMap<K, V>(
+  iter: Iterable<[K, V]>,
+  key: (k: K) => string,
+): Map<string, { k: K; v: V }> {
+  const m = new Map<string, { k: K; v: V }>();
+  for (const [k, v] of iter) m.set(key(k), { k, v });
+  return m;
+}
+
+export type MapDiff<K, V> = {
+  added:   { k: K; v: V }[];
+  removed: { k: K; v: V }[];
+  updated: { k: K; prev: V; curr: V }[];
+};
+
+/** Diff two ledger-map snapshots. Updated entries are included when any field differs. */
+export function diffMap<K, V>(
+  prev: Map<string, { k: K; v: V }>,
+  curr: Map<string, { k: K; v: V }>,
+  equals: (a: V, b: V) => boolean,
+): MapDiff<K, V> {
+  const added:   { k: K; v: V }[] = [];
+  const removed: { k: K; v: V }[] = [];
+  const updated: { k: K; prev: V; curr: V }[] = [];
+
+  for (const [ks, entry] of curr) {
+    if (!prev.has(ks)) {
+      added.push(entry);
+    } else {
+      const prevEntry = prev.get(ks)!;
+      if (!equals(prevEntry.v, entry.v)) {
+        updated.push({ k: entry.k, prev: prevEntry.v, curr: entry.v });
+      }
+    }
+  }
+  for (const [ks, entry] of prev) {
+    if (!curr.has(ks)) removed.push(entry);
+  }
+  return { added, removed, updated };
+}
+
+// ── Equality helpers ───────────────────────────────────────────────────────────
+
+export function issuerEquals(a: IssuerRecord, b: IssuerRecord): boolean {
+  return a.isActive === b.isActive && toHex(a.organizerPk) === toHex(b.organizerPk);
+}
+
+export function eventEquals(a: EventRecord, b: EventRecord): boolean {
+  return (
+    a.isActive === b.isActive &&
+    a.minted === b.minted &&
+    a.maxSupply === b.maxSupply &&
+    a.expiration === b.expiration &&
+    a.isPublicMint === b.isPublicMint &&
+    toHex(a.organizer) === toHex(b.organizer)
+  );
+}

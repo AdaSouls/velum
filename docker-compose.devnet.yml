@@ -34,7 +34,7 @@ services:
     image: postgres:15
     container_name: "poap-postgres"
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: "indexer"
       POSTGRES_PASSWORD: "indexer"
@@ -43,6 +43,22 @@ services:
       - poap_pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: 5s
+      retries: 10
+
+  poap-pg:
+    image: postgres:15
+    container_name: "poap-indexer-pg"
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: "poap"
+      POSTGRES_PASSWORD: "poap"
+      POSTGRES_DB: "poap_indexer"
+    volumes:
+      - poap_indexer_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poap"]
       interval: 5s
       retries: 10
 
@@ -56,9 +72,10 @@ services:
     image: "midnightnetwork/midnight-pubsub-indexer:1.2.0"
     platform: linux/amd64
     container_name: "poap-chain-indexer"
+    command: ["-Dlogback.configurationFile=logback-json-file.xml"]
     environment:
       OPERATION_MODE: "chain-indexer"
-      LOG_LEVEL: "INFO"
+      LOG_LEVEL: "TRACE"
       LEDGER_NETWORK_ID: "Undeployed"
       SUBSTRATE_NODE_WS_URL: "ws://node:9944"
       DB_VENDOR: "postgresql"
@@ -68,7 +85,7 @@ services:
       REDIS_URL: "tcp://redis:6379"
       OTEL_JAVAAGENT_ENABLED: "false"
     healthcheck:
-      test: ["CMD", "sh", "-c", "grep -q 'Successfully applied .* migrations to schema' /tmp/app_logs/server.log"]
+      test: ["CMD", "sh", "-c", "grep -q 'NodeListener web socket connection has been established' /tmp/app_logs/server.log"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -84,6 +101,7 @@ services:
     image: "midnightnetwork/midnight-pubsub-indexer:1.2.0"
     platform: linux/amd64
     container_name: "poap-wallet-indexer"
+    command: ["-Dlogback.configurationFile=logback-json-file.xml"]
     ports:
       - "8089:8088"
     environment:
@@ -105,6 +123,7 @@ services:
     image: "midnightnetwork/midnight-pubsub-indexer:1.2.0"
     platform: linux/amd64
     container_name: "poap-graphql-api"
+    command: ["-Dlogback.configurationFile=logback-json-file.xml"]
     ports:
       - "8090:8088"
     environment:
@@ -124,3 +143,4 @@ services:
 
 volumes:
   poap_pg_data:
+  poap_indexer_pg_data:
