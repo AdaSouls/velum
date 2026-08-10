@@ -53,7 +53,7 @@ export function tokensRouter(db: Pool): Router {
   return router;
 }
 
-function normaliseToken(row: Record<string, unknown>) {
+export function normaliseToken(row: Record<string, unknown>) {
   return {
     tokenId:      Number(row.token_id),
     ownerPk:      row.owner_pk,

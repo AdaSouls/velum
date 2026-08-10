@@ -8,10 +8,8 @@
     "test": "npx vitest run"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-runtime": "0.6.13",
-    "@midnight-ntwrk/ledger": "2.0.8",
-    "@midnight-ntwrk/midnight-js-network-id": "0.1.15",
-    "@midnight-ntwrk/zswap": "0.3.11",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/midnight-js-network-id": "^4.1.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "graphql": "16.8.1",

@@ -2,17 +2,24 @@
  * Parses the hex-encoded contract state returned by the Midnight Indexer into a
  * typed ledger object using the compiled Compact contract artifacts.
  *
- * The `state` field on ContractCall/ContractDeploy is a hex string.
- * ContractState.deserialize converts it to an internal ContractState object,
- * and ledger() (from index.cjs) materialises the typed public-ledger view.
+ * The `state` field on ContractAction (ContractDeploy/ContractCall/ContractUpdate) is a hex
+ * string. ContractState.deserialize converts it to a ContractState, whose `.data` (a
+ * ChargedState) is what the compiled contract's ledger() now expects.
+ *
+ * The compiled contract module is ESM (contracts/src/managed/poap/contract/index.js), so it's
+ * loaded via dynamic import rather than createRequire — call initContractModule() once at
+ * startup before any parseState() call.
  */
 
-import { createRequire } from 'node:module';
 import * as compactRuntime from '@midnight-ntwrk/compact-runtime';
 import { config } from './config.js';
 
-const require = createRequire(import.meta.url);
-const { ledger: _ledger } = require(config.contractCjsPath);
+let _ledger: ((state: unknown) => LedgerView) | undefined;
+
+export async function initContractModule(): Promise<void> {
+  const mod = await import(config.contractModulePath);
+  _ledger = mod.ledger;
+}
 
 export type EventRecord = {
   maxSupply: bigint;
@@ -41,6 +48,7 @@ export type LedgerView = {
 };
 
 export function parseState(stateHex: string): LedgerView {
+  if (!_ledger) throw new Error('Contract module not initialized — call initContractModule() first');
   const bytes = Buffer.from(stateHex, 'hex');
   const cs = (compactRuntime as any).ContractState.deserialize(bytes);
   return _ledger(cs.data) as LedgerView;

@@ -1,19 +1,15 @@
 /**
  * AdaSouls POAP Indexer — main entry point.
  *
- * Run from the midnight-examples monorepo so compact-runtime resolves correctly:
- *
- *   cd /Users/<user>/Projects/midnight-network/midnight-examples-0.1.12
- *   npm install pg express          # once, if not already present
- *   npx tsx /Users/<user>/Projects/poap-midnight/indexer/src/index.ts
+ *   npx tsx indexer/src/index.ts
  *
  * Requires a running PostgreSQL instance and the following env vars
  * (or defaults in config.ts apply for local devnet):
  *
- *   CONTRACT_ADDRESS   — deployed contract address
- *   DATABASE_URL       — postgresql://user:pass@host:port/dbname
- *   MIDNIGHT_INDEXER_WS — ws://…/api/v1/graphql/ws  (default: localhost:8090)
- *   PORT               — REST API port (default: 3001)
+ *   CONTRACT_ADDRESS    — deployed contract address
+ *   DATABASE_URL        — postgresql://user:pass@host:port/dbname
+ *   MIDNIGHT_INDEXER_WS — ws://…/api/v4/graphql/ws  (default: localhost:8088, devnet.yml)
+ *   PORT                — REST API port (default: 3001)
  */
 
 import { webcrypto } from 'node:crypto';
@@ -26,13 +22,14 @@ if (!globalThis.crypto) {
 // @ts-expect-error Apollo WebSocket shim
 globalThis.WebSocket = WebSocket;
 
-import { setNetworkId, networkId } from '@midnight-ntwrk/midnight-js-network-id';
-setNetworkId(networkId.undeployed);
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+setNetworkId('undeployed');
 
 import { pool, runMigrations } from './db.js';
 import { buildClient } from './client.js';
 import { startSubscription } from './subscriptions.js';
 import { startApiServer } from './api/index.js';
+import { initContractModule } from './parser.js';
 import { config } from './config.js';
 
 async function main() {
@@ -41,6 +38,9 @@ async function main() {
   console.log(`  indexer  : ${config.indexerWs}`);
   console.log(`  db       : ${config.dbUrl.replace(/:\/\/.*@/, '://<hidden>@')}`);
   console.log();
+
+  // Load the compiled contract module (ESM — needed before any parseState() call)
+  await initContractModule();
 
   // Apply DB migrations
   await runMigrations();

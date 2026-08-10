@@ -1,8 +1,15 @@
 /**
  * TASK-019: Midnight Indexer contract-event subscription.
  *
- * Subscribes to contract(address) events using the real GraphQL schema:
- *   subscription { contract(address, offset) { ... on ContractCall { operation state } } }
+ * Subscribes to contractActions(address) using the new-generation indexer-standalone GraphQL
+ * schema (confirmed via introspection against a running indexer-standalone:4.2.1 — the old
+ * indexer's `contract` field/`operation` field/`BlockOffsetInput` type were renamed to
+ * `contractActions`/`entryPoint`/`BlockOffset`, and `state`/`transaction` moved onto the shared
+ * ContractAction interface so they no longer need to be repeated per inline fragment):
+ *   subscription { contractActions(address, offset) { state transaction {...} ... on ContractCall { entryPoint } } }
+ *
+ * The ContractAction interface now has three implementations: ContractDeploy, ContractCall, and
+ * ContractUpdate (contract-maintenance changes, e.g. verifier key updates — no entryPoint).
  *
  * For each event:
  *   1. Parse the current ledger state (parseState)
@@ -17,18 +24,14 @@ import { parseState, type LedgerView } from './parser.js';
 import { applyStateDiff, type TxMeta } from './poap-state.js';
 import { loadCursor, saveCursor } from './db.js';
 
-// Subscription document — uses inline fragments for the ContractCallOrDeploy union
 const CONTRACT_SUB = `
-  subscription ContractSub($address: String!, $offset: BlockOffsetInput) {
-    contract(address: $address, offset: $offset) {
-      ... on ContractDeploy {
-        transaction { hash block { height } }
-        state
-      }
+  subscription ContractSub($address: HexEncoded!, $offset: BlockOffset) {
+    contractActions(address: $address, offset: $offset) {
+      __typename
+      state
+      transaction { hash block { height } }
       ... on ContractCall {
-        transaction { hash block { height } }
-        operation
-        state
+        entryPoint
       }
     }
   }
@@ -48,7 +51,7 @@ export async function startSubscription(
   const offset = lastBlock > 0n ? { height: lastBlock.toString() } : undefined;
 
   return new Promise<void>((resolve, reject) => {
-    const cleanup = client.subscribe<{ contract: ContractEvent }>(
+    const cleanup = client.subscribe<{ contractActions: ContractEvent }>(
       { query: CONTRACT_SUB, variables: { address: contractAddress, offset } },
       {
         next: async ({ data, errors }) => {
@@ -56,9 +59,9 @@ export async function startSubscription(
             console.error('[sub] subscription errors:', errors);
             return;
           }
-          if (!data?.contract) return;
+          if (!data?.contractActions) return;
 
-          const event = data.contract;
+          const event = data.contractActions;
           try {
             await handleEvent(db, event, prevLedger, (newPrev) => { prevLedger = newPrev; });
           } catch (err) {
@@ -88,7 +91,7 @@ async function handleEvent(
 ): Promise<void> {
   const stateHex = event.state;
   const currLedger = parseState(stateHex);
-  const operation = (event as ContractCall).operation ?? 'deploy';
+  const operation = (event as ContractCall).entryPoint ?? (event.__typename === 'ContractUpdate' ? 'update' : 'deploy');
   const tx = event.transaction;
   const meta: TxMeta = { txHash: tx.hash, blockHeight: BigInt(tx.block.height) };
 
@@ -101,9 +104,10 @@ async function handleEvent(
 
 type BlockRef  = { height: string };
 type TxRef     = { hash: string; block: BlockRef };
-type ContractDeploy = { state: string; transaction: TxRef; __typename?: 'ContractDeploy' };
-type ContractCall   = { state: string; transaction: TxRef; operation: string; __typename?: 'ContractCall' };
-type ContractEvent  = ContractDeploy | ContractCall;
+type ContractDeploy = { state: string; transaction: TxRef; __typename: 'ContractDeploy' };
+type ContractCall   = { state: string; transaction: TxRef; entryPoint: string; __typename: 'ContractCall' };
+type ContractUpdate = { state: string; transaction: TxRef; __typename: 'ContractUpdate' };
+type ContractEvent  = ContractDeploy | ContractCall | ContractUpdate;
 
 // ── Empty ledger (used when no prior state exists) ─────────────────────────────
 

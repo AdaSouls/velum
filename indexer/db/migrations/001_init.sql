@@ -48,4 +48,5 @@ CREATE TABLE IF NOT EXISTS tokens (
 
 CREATE INDEX IF NOT EXISTS tokens_owner_pk_idx  ON tokens(owner_pk);
 CREATE INDEX IF NOT EXISTS tokens_issuer_pk_idx ON tokens(issuer_pk);
+CREATE INDEX IF NOT EXISTS tokens_first_event_id_idx ON tokens(first_event_id);
 CREATE INDEX IF NOT EXISTS events_issuer_pk_idx ON events(issuer_pk);

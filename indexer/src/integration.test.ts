@@ -9,13 +9,14 @@
  * Live-devnet tests (run with LIVE_DEVNET=true):
  *   Connects to the real Midnight Indexer WebSocket, verifies the subscription
  *   handshake, and confirms the deployed contract's state is queryable via the
- *   REST API. Requires devnet docker compose and CONTRACT_ADDRESS to be set.
+ *   REST API. Requires the new-generation devnet (devnet.yml) and CONTRACT_ADDRESS to be set.
  *
  * Prerequisites (component tests):
  *   docker compose -f docker-compose.devnet.yml up -d poap-pg
  *
  * Prerequisites (live devnet):
- *   docker compose -f docker-compose.devnet.yml up -d
+ *   docker compose -f devnet.yml up -d                      # node + indexer-standalone + proof-server
+ *   docker compose -f docker-compose.devnet.yml up -d poap-pg  # indexer app's own Postgres
  *   CONTRACT_ADDRESS=<deployed-address> LIVE_DEVNET=true npm test
  */
 
@@ -208,6 +209,41 @@ describe('POAP indexer — component integration', () => {
     expect(body[0].createdBlock).toBe(1);
   });
 
+  it('GET /api/events?issuerPk=<hex> scopes to a single organizer server-side', async () => {
+    if (!pool) return;
+
+    const empty     = emptyLedger();
+    const withAdmin = withEvent(empty,     EVENT_A, ADMIN_PK, 100n);
+    const withBoth  = withEvent(withAdmin, EVENT_B, USER1_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, withBoth, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    const adminEvents = await (await fetch(`${apiBase}/api/events?issuerPk=${hex(ADMIN_PK)}`)).json() as any[];
+    const user1Events = await (await fetch(`${apiBase}/api/events?issuerPk=${hex(USER1_PK)}`)).json() as any[];
+    const unknownPk    = await (await fetch(`${apiBase}/api/events?issuerPk=${'00'.repeat(32)}`)).json() as any[];
+
+    expect(adminEvents).toHaveLength(1);
+    expect(adminEvents[0].eventId).toBe(hex(EVENT_A));
+    expect(user1Events).toHaveLength(1);
+    expect(user1Events[0].eventId).toBe(hex(EVENT_B));
+    expect(unknownPk).toEqual([]);
+  });
+
+  it('GET /api/events without issuerPk still returns every event (unchanged behaviour)', async () => {
+    if (!pool) return;
+
+    const empty     = emptyLedger();
+    const withAdmin = withEvent(empty,     EVENT_A, ADMIN_PK, 100n);
+    const withBoth  = withEvent(withAdmin, EVENT_B, USER1_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, withBoth, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    const body = await (await fetch(`${apiBase}/api/events`)).json() as any[];
+    expect(body).toHaveLength(2);
+  });
+
   it('claimOrUpdate → token appears in GET /api/tokens/owner/:pk', async () => {
     if (!pool) return;
 
@@ -356,6 +392,116 @@ describe('POAP indexer — component integration', () => {
     expect(evBody.deactivatedBlock).toBe(4);
   });
 
+  it('GET /api/events/:id/tokens lists every token minted for that event', async () => {
+    if (!pool) return;
+
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+      txHash: '0xbbbb0002', blockHeight: 2n,
+    });
+
+    const afterClaim2 = withToken(afterClaim1, 2n, USER2_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim2, {
+      txHash: '0xcccc0003', blockHeight: 3n,
+    });
+
+    const res    = await fetch(`${apiBase}/api/events/${hex(EVENT_A)}/tokens`);
+    const tokens = await res.json() as any[];
+
+    expect(res.status).toBe(200);
+    expect(tokens).toHaveLength(2);
+    expect(tokens.map((t) => t.tokenId)).toEqual([1, 2]);
+    expect(tokens.map((t) => t.ownerPk)).toEqual([hex(USER1_PK), hex(USER2_PK)]);
+    expect(tokens.every((t) => t.firstEventId === hex(EVENT_A))).toBe(true);
+    expect(tokens.every((t) => t.isBurned === false)).toBe(true);
+  });
+
+  it('GET /api/events/:id/tokens only returns tokens of that event', async () => {
+    if (!pool) return;
+
+    const empty  = emptyLedger();
+    const withA  = withEvent(empty,  EVENT_A, ADMIN_PK, 100n);
+    const withAB = withEvent(withA,  EVENT_B, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, withAB, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    // user1 claims EVENT_A, user2 claims EVENT_B
+    const afterClaimA = withToken(withAB,      1n, USER1_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'claimOrUpdate', withAB, afterClaimA, {
+      txHash: '0xbbbb0002', blockHeight: 2n,
+    });
+    const afterClaimB = withToken(afterClaimA, 2n, USER2_PK, ADMIN_PK, EVENT_B);
+    await applyStateDiff(pool, 'claimOrUpdate', afterClaimA, afterClaimB, {
+      txHash: '0xcccc0003', blockHeight: 3n,
+    });
+
+    const tokensA = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}/tokens`)).json() as any[];
+    const tokensB = await (await fetch(`${apiBase}/api/events/${hex(EVENT_B)}/tokens`)).json() as any[];
+
+    expect(tokensA).toHaveLength(1);
+    expect(tokensA[0].ownerPk).toBe(hex(USER1_PK));
+    expect(tokensB).toHaveLength(1);
+    expect(tokensB[0].ownerPk).toBe(hex(USER2_PK));
+  });
+
+  it('GET /api/events/:id/tokens?includeBurned=false excludes burned tokens', async () => {
+    if (!pool) return;
+
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+      txHash: '0xbbbb0002', blockHeight: 2n,
+    });
+    const afterClaim2 = withToken(afterClaim1, 2n, USER2_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim2, {
+      txHash: '0xcccc0003', blockHeight: 3n,
+    });
+
+    const afterBurn = withBurn(afterClaim2, 1n);
+    await applyStateDiff(pool, 'burn', afterClaim2, afterBurn, {
+      txHash: '0xdddd0004', blockHeight: 4n,
+    });
+
+    const all  = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}/tokens`)).json() as any[];
+    const live = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}/tokens?includeBurned=false`)).json() as any[];
+
+    expect(all).toHaveLength(2);
+    expect(live).toHaveLength(1);
+    expect(live[0].tokenId).toBe(2);
+  });
+
+  it('GET /api/events/:id/tokens returns 404 for unknown event', async () => {
+    if (!pool) return;
+    const res = await fetch(`${apiBase}/api/events/${'00'.repeat(32)}/tokens`);
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /api/events/:id/tokens returns [] for an event with no claims', async () => {
+    if (!pool) return;
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
+      txHash: '0xaaaa0001', blockHeight: 1n,
+    });
+
+    const res  = await fetch(`${apiBase}/api/events/${hex(EVENT_A)}/tokens`);
+    const body = await res.json() as any[];
+    expect(res.status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
   it('GET /api/events/:id returns 404 for unknown event', async () => {
     if (!pool) return;
     const res = await fetch(`${apiBase}/api/events/${'00'.repeat(32)}`);
@@ -394,6 +540,14 @@ describe.skipIf(!LIVE)('POAP indexer — live devnet', () => {
         wsClient.dispose();
         resolve();
       });
+
+      // graphql-ws connects lazily — the socket only opens once something subscribes.
+      // `blocks` takes no required args, so it's a cheap way to trigger the handshake.
+      const cleanup = wsClient.subscribe(
+        { query: 'subscription { blocks { hash } }' },
+        { next: () => {}, error: () => {}, complete: () => {} },
+      );
+      void cleanup;
     });
   });
 
@@ -410,9 +564,11 @@ describe.skipIf(!LIVE)('POAP indexer — live devnet', () => {
       let resolved = false;
       const dispose = wsClient.subscribe(
         {
-          query: `subscription { contract(address: "${config.contractAddress}") {
-            ... on ContractDeploy { transaction { hash block { height } } state }
-            ... on ContractCall   { transaction { hash block { height } } operation state }
+          query: `subscription { contractActions(address: "${config.contractAddress}") {
+            __typename
+            state
+            transaction { hash block { height } }
+            ... on ContractCall { entryPoint }
           } }`,
         },
         {

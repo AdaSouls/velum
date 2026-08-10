@@ -1,0 +1,12 @@
+{
+  "name": "poap-midnight",
+  "private": true,
+  "workspaces": [
+    "contracts",
+    "scripts",
+    "indexer"
+  ],
+  "overrides": {
+    "@midnight-ntwrk/onchain-runtime-v3": "3.1.0"
+  }
+}

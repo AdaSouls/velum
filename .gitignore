@@ -4,3 +4,5 @@
 node_modules/
 .DS_Store
 contracts/src/managed/poap/keys/
+scripts/logs/
+scripts/midnight-level-db/
