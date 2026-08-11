@@ -48,7 +48,10 @@ export async function startSubscription(
   // Restore previous ledger state for diffing (empty on first run)
   let prevLedger: LedgerView = lastState ? parseState(lastState) : emptyLedger();
 
-  const offset = lastBlock > 0n ? { height: lastBlock.toString() } : undefined;
+  // BlockOffset.height is Int in the indexer-standalone v4 schema, not String —
+  // sending a string here fails GraphQL variable coercion on resubscribe after a
+  // restart (only path where lastBlock > 0), which silently kills the subscription.
+  const offset = lastBlock > 0n ? { height: Number(lastBlock) } : undefined;
 
   return new Promise<void>((resolve, reject) => {
     const cleanup = client.subscribe<{ contractActions: ContractEvent }>(
