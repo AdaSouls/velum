@@ -103,6 +103,13 @@
             "type-name": "Opaque",
             "tsType": "string"
           }
+        },
+        {
+          "name": "privateMetadataCommit",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
         }
       ],
       "result-type": {
@@ -209,6 +216,82 @@
       "result-type": {
         "type-name": "Bytes",
         "length": 32
+      }
+    },
+    {
+      "name": "getHolderPk",
+      "pure": false,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "issuerId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "computePrivateMetadataCommit",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "revealPrivateMetadata",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
       }
     }
   ],
@@ -468,13 +551,34 @@
               "type-name": "Opaque",
               "tsType": "string"
             }
+          },
+          {
+            "name": "privateMetadataCommit",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
           }
         ]
       }
     },
     {
-      "name": "issuers",
+      "name": "eventRevealedMetadata",
       "index": 6,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "issuers",
+      "index": 7,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -503,7 +607,7 @@
     },
     {
       "name": "burnedTokens",
-      "index": 7,
+      "index": 8,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -516,7 +620,7 @@
     },
     {
       "name": "isPaused",
-      "index": 8,
+      "index": 9,
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -525,7 +629,7 @@
     },
     {
       "name": "adminPk",
-      "index": 9,
+      "index": 10,
       "exported": true,
       "storage": "Cell",
       "type": {

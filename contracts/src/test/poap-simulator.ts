@@ -4,7 +4,7 @@ import {
   emptyZswapLocalState,
   sampleContractAddress,
 } from '@midnight-ntwrk/compact-runtime';
-import { Contract, type Ledger, ledger } from '../managed/poap/contract/index.js';
+import { Contract, type Ledger, ledger, pureCircuits } from '../managed/poap/contract/index.js';
 import { createWitnesses, type PoapPrivateState } from '../witnesses.js';
 
 // The POAP contract is account-model (no shielded coins), so the Zswap coin
@@ -111,9 +111,18 @@ export class PoapSimulator {
     expiration: bigint,
     isPublicMint: boolean,
     metadataURI: string = 'ipfs://test-metadata',
+    privateMetadataCommit: Uint8Array = new Uint8Array(32),
   ): Ledger {
     this.circuitContext = this.contract.impureCircuits
-      .createEvent(this.circuitContext, eventId, maxSupply, expiration, isPublicMint, metadataURI)
+      .createEvent(
+        this.circuitContext,
+        eventId,
+        maxSupply,
+        expiration,
+        isPublicMint,
+        metadataURI,
+        privateMetadataCommit,
+      )
       .context;
     this.savePrivateState();
     return this.getLedger();
@@ -145,6 +154,16 @@ export class PoapSimulator {
     return this.getLedger();
   }
 
+  // ── Private metadata (commit/reveal) ─────────────────────────────────────
+
+  revealPrivateMetadata(eventId: Uint8Array, value: Uint8Array, rand: Uint8Array): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .revealPrivateMetadata(this.circuitContext, eventId, value, rand)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
   // Organizer- or admin-initiated mint directly to a recipient's public key.
   // Does not touch the caller's private state (the recipient's wallet
   // reconciles it on its next claimOrUpdate call).
@@ -160,9 +179,24 @@ export class PoapSimulator {
 
   // Derive the public key for the currently active user's secret key.
   // Mirrors the on-chain derive_pk circuit so tests can look up issuerId keys.
+  // This is the GLOBAL identity (admin/issuer/organizer) — do not use it to
+  // predict a tokenOwner entry, use getHolderPk for that.
   getCallerPk(): Uint8Array {
     const result = this.contract.impureCircuits.getCallerPk(this.circuitContext);
     return result.result as Uint8Array;
+  }
+
+  // Per-issuer holder pseudonym for the currently active user — what their
+  // tokenOwner entry looks like for this specific issuer.
+  getHolderPk(issuerId: Uint8Array): Uint8Array {
+    const result = this.contract.impureCircuits.getHolderPk(this.circuitContext, issuerId);
+    return result.result as Uint8Array;
+  }
+
+  // Pure helper, no circuit context needed — computes the same commitment
+  // the chain checks in revealPrivateMetadata.
+  static computePrivateMetadataCommit(value: Uint8Array, rand: Uint8Array): Uint8Array {
+    return pureCircuits.computePrivateMetadataCommit(value, rand);
   }
 
   private savePrivateState(): void {

@@ -151,7 +151,15 @@ async function main() {
     contractAddress,
     privateStateId: PRIVATE_STATE_ID,
     circuitId: 'createEvent',
-    args: [DEMO_EVENT_ID, 100n, 0n, true, 'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json'],
+    // Fully public demo event — all-zero privateMetadataCommit means "no private part".
+    args: [
+      DEMO_EVENT_ID,
+      100n,
+      0n,
+      true,
+      'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json',
+      new Uint8Array(32),
+    ],
   });
   logger.info(`Event created in block ${eventTx.public.blockHeight}, tx: ${eventTx.public.txHash}`);
 

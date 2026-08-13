@@ -15,6 +15,9 @@ export struct EventRecord {
   // metadata applies to every token minted for this event — see tokenURI in
   // OpenZeppelin's Compact NonFungibleToken module for the per-token analogue.
   metadataURI: Opaque<"string">,
+  // Commitment to a private-fields digest (see computePrivateMetadataCommit /
+  // revealPrivateMetadata below). All-zero Bytes<32> means "no private part".
+  privateMetadataCommit: Bytes<32>,
 }
 
 export struct IssuerRecord {
@@ -42,6 +45,12 @@ export ledger issuerHolderToken: Map<Bytes<32>, Uint<64>>;
 
 // eventId → event metadata
 export ledger events: Map<Bytes<32>, EventRecord>;
+
+// eventId → revealed private-metadata digest, once someone has proven it
+// matches the event's privateMetadataCommit. Public once revealed by
+// design — the point of commit-reveal is that content becomes public data
+// at reveal time; only the *timing* of disclosure was ever private.
+export ledger eventRevealedMetadata: Map<Bytes<32>, Bytes<32>>;
 
 // issuerId (organizer pk) → issuer metadata
 export ledger issuers: Map<Bytes<32>, IssuerRecord>;
@@ -94,6 +103,19 @@ circuit caller_pk(): Bytes<32> {
   return disclose(derive_pk(local_sk()));
 }
 
+// Per-issuer holder pseudonym. Unlike caller_pk() (one stable identity used
+// for admin/issuer/organizer roles everywhere), this derives a DIFFERENT,
+// uncorrelatable value per issuer for the same wallet — so a chain observer
+// can't tell that the wallet holding a POAP from Issuer A is the same wallet
+// holding one from Issuer B. Tokens from the SAME issuer still correlate on
+// purpose: that's what lets claimOrUpdate update one ongoing token instead
+// of minting a new one per event from that issuer (see holder_token_key).
+circuit holder_pk(issuerId: Bytes<32>): Bytes<32> {
+  return disclose(persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:holder-pk:v1:"), local_sk(), issuerId]
+           ));
+}
+
 // Public-ledger key for the (holder, issuer) → token index. Lets organizer
 // push-minting and self-service reconciliation agree on one token per wallet
 // per issuer without ever touching a wallet's private state.
@@ -106,16 +128,6 @@ circuit holder_token_key(holderPk: Bytes<32>, issuerId: Bytes<32>): Bytes<32> {
 
 circuit is_admin(): Boolean {
   return adminPk == caller_pk();
-}
-
-// True if the caller IS the registered, active issuer identified by issuerId.
-// issuerId is the issuer's own public key on Midnight.
-circuit is_active_issuer(issuerId: Bytes<32>): Boolean {
-  if (!issuers.member(issuerId)) {
-    return false;
-  }
-  const issuer = issuers.lookup(issuerId);
-  return issuer.isActive && issuerId == caller_pk();
 }
 
 // ── Pause / Unpause ───────────────────────────────────────────────────────────
@@ -131,9 +143,11 @@ export circuit unpause(): [] {
 }
 
 // ── Issuer Management ─────────────────────────────────────────────────────────
+// Anyone can create events (see createEvent) — registration here is NOT a
+// gate. It's an optional "verified organizer" signal an admin can curate;
+// the frontend may choose to show a checkmark for registered issuers.
 
 // Register an issuer by their Midnight public key. Admin-only.
-// After registration the issuer can create and manage their own events.
 export circuit registerIssuer(issuerPk: Bytes<32>): [] {
   const pk = disclose(issuerPk);
   assert(!isPaused, "Contract is paused");
@@ -156,14 +170,24 @@ export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
 
 // ── Event Management ──────────────────────────────────────────────────────────
 
-// Create an event. Callable by admin or any registered active issuer.
-// The caller's public key becomes the issuerId for this event.
+// Create an event. Permissionless: callable by anyone. The caller's own
+// public key becomes the issuerId for this event — no registration or
+// admin approval required. Admin retains a global moderation override via
+// deactivateEvent/pause; the issuer registry above is opt-in metadata, not
+// a gate.
+//
+// privateMetadataCommit lets the organizer keep part of the event's
+// metadata hidden from everyone except whoever they later share the
+// (value, rand) opening with — see computePrivateMetadataCommit and
+// revealPrivateMetadata. Pass an all-zero Bytes<32> for a fully public
+// event with no private part.
 export circuit createEvent(
                  eventId: Bytes<32>,
                  maxSupply: Uint<64>,
                  expiration: Uint<64>,
                  isPublicMint: Boolean,
-                 metadataURI: Opaque<"string">
+                 metadataURI: Opaque<"string">,
+                 privateMetadataCommit: Bytes<32>
                  ): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
@@ -171,8 +195,8 @@ export circuit createEvent(
   const exp = disclose(expiration);
   const pubMint = disclose(isPublicMint);
   const metaURI = disclose(metadataURI);
+  const privCommit = disclose(privateMetadataCommit);
   const issuerId = caller_pk();
-  assert(is_admin() || is_active_issuer(issuerId), "Not authorized to create events");
   assert(!events.member(evId), "Event already exists");
 
   const ev = EventRecord { maxSupply: maxS,
@@ -181,7 +205,8 @@ export circuit createEvent(
                            organizer: issuerId,
                            isActive: true,
                            isPublicMint: pubMint,
-                           metadataURI: metaURI };
+                           metadataURI: metaURI,
+                           privateMetadataCommit: privCommit };
   events.insert(evId, ev);
 }
 
@@ -198,7 +223,8 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
                                 organizer: ev.organizer,
                                 isActive: false,
                                 isPublicMint: ev.isPublicMint,
-                                metadataURI: ev.metadataURI };
+                                metadataURI: ev.metadataURI,
+                                privateMetadataCommit: ev.privateMetadataCommit };
   events.insert(evId, updated);
 }
 
@@ -213,7 +239,7 @@ circuit mintTokenInternal(issuerId: Bytes<32>, eventId: Bytes<32>, isSoulbound: 
          "Event has reached maximum supply"
          );
 
-  const pk = caller_pk();
+  const pk = holder_pk(issuerId);
   const key = holder_token_key(pk, issuerId);
   assert(!issuerHolderToken.member(key), "Wallet already has a token for this issuer");
 
@@ -232,7 +258,8 @@ circuit mintTokenInternal(issuerId: Bytes<32>, eventId: Bytes<32>, isSoulbound: 
                         organizer: ev.organizer,
                         isActive: ev.isActive,
                         isPublicMint: ev.isPublicMint,
-                        metadataURI: ev.metadataURI };
+                        metadataURI: ev.metadataURI,
+                        privateMetadataCommit: ev.privateMetadataCommit };
   events.insert(eventId, updatedEv);
 
   store_token(tokenId, issuerId, eventId, isSoulbound);
@@ -247,7 +274,7 @@ circuit updateToken(tokenId: Uint<64>, issuerId: Bytes<32>, eventId: Bytes<32>):
 
   assert(tokenOwner.member(tokenId), "Token does not exist");
   assert(!burnedTokens.member(tokenId), "Token has been burned");
-  assert(tokenOwner.lookup(tokenId) == caller_pk(), "Caller does not own this token");
+  assert(tokenOwner.lookup(tokenId) == holder_pk(issuerId), "Caller does not own this token");
   assert(tokenIssuer.lookup(tokenId) == issuerId, "Token belongs to a different issuer");
   assert(!disclose(has_attended(issuerId, eventId)), "Already attended this event");
 
@@ -287,7 +314,7 @@ export circuit claimOrUpdate(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   if (disclose(maybeToken.is_some)) {
     updateToken(disclose(maybeToken.value), issuerId, evId);
   } else {
-    const key = holder_token_key(caller_pk(), issuerId);
+    const key = holder_token_key(holder_pk(issuerId), issuerId);
     if (issuerHolderToken.member(key)) {
       // Token already exists on-chain (e.g. the organizer push-minted it via
       // mintTo) but this wallet's local cache doesn't know about it yet.
@@ -340,7 +367,8 @@ export circuit mintTo(eventId: Bytes<32>, recipientPk: Bytes<32>): [] {
                         organizer: ev.organizer,
                         isActive: ev.isActive,
                         isPublicMint: ev.isPublicMint,
-                        metadataURI: ev.metadataURI };
+                        metadataURI: ev.metadataURI,
+                        privateMetadataCommit: ev.privateMetadataCommit };
   events.insert(evId, updatedEv);
 }
 
@@ -356,12 +384,54 @@ export circuit burn(tokenId: Uint<64>): [] {
   assert(!isPaused, "Contract is paused");
   assert(tokenOwner.member(tId), "Token does not exist");
   assert(!burnedTokens.member(tId), "Token already burned");
-  assert(tokenOwner.lookup(tId) == caller_pk(), "Caller does not own this token");
+  const issuerId = tokenIssuer.lookup(tId);
+  assert(tokenOwner.lookup(tId) == holder_pk(issuerId), "Caller does not own this token");
   burnedTokens.insert(tId, true);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
+// Global identity: the same value for this wallet across every issuer/admin
+// context. Do NOT use this to look up a holder's token in tokenOwner — use
+// getHolderPk for that.
 export circuit getCallerPk(): Bytes<32> {
   return caller_pk();
+}
+
+// Per-issuer holder pseudonym for the caller. This is what the caller's
+// tokenOwner entry looks like for this specific issuer. Share it with an
+// organizer so they can mintTo() you, or use it to check your own claim.
+export circuit getHolderPk(issuerId: Bytes<32>): Bytes<32> {
+  return holder_pk(issuerId);
+}
+
+// ── Event Metadata: Private-field Commit / Reveal ────────────────────────────
+
+// Pure helper so off-chain code (the frontend, tests) can compute the exact
+// commitment the chain will later check, without reimplementing
+// persistentCommit. Call this to get the value to pass as createEvent's
+// privateMetadataCommit — value is a digest of whatever private content you
+// want to hide (e.g. hash of {"neighborhood":"Palermo"}), rand is fresh
+// randomness you must keep to reveal later (never reuse rand across events).
+export circuit computePrivateMetadataCommit(value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return persistentCommit<Bytes<32>>(disclose(value), disclose(rand));
+}
+
+// Anyone who knows (value, rand) for an event's privateMetadataCommit can
+// reveal it: recompute the commitment and check it matches what the
+// organizer committed to at createEvent time. No caller-identity check is
+// needed — knowing the opening IS the authorization, same as any
+// commit-reveal scheme. Once revealed, the digest becomes permanent public
+// ledger state (see eventRevealedMetadata) — commit-reveal hides *when*
+// something becomes public, not whether it ever does.
+export circuit revealPrivateMetadata(eventId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): [] {
+  assert(!isPaused, "Contract is paused");
+  const evId = disclose(eventId);
+  const val = disclose(value);
+  const r = disclose(rand);
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+  const commit = persistentCommit<Bytes<32>>(val, r);
+  assert(commit == ev.privateMetadataCommit, "Value does not match the committed metadata");
+  eventRevealedMetadata.insert(evId, val);
 }

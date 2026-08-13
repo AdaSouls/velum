@@ -45,10 +45,11 @@ describe('POAP contract — createEvent', () => {
     expect(afterDeactivate.events.lookup(EVENT_A).metadataURI).toBe('ipfs://bafy-event-a-metadata');
   });
 
-  it('unregistered address cannot create an event', () => {
+  it('any wallet can create an event — permissionless, no registration required', () => {
     const sim = new PoapSimulator(ADMIN_SK);
-    sim.asUser(USER1_SK);
-    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).not.toThrow();
+    expect(sim.getLedger().events.lookup(EVENT_A).organizer).toEqual(user1Pk);
   });
 
   it('registered issuer can create an event', () => {
@@ -69,15 +70,16 @@ describe('POAP contract — createEvent', () => {
     expect(() => sim.createEvent(EVENT_A, 50n, 0n, true)).toThrow();
   });
 
-  it('deactivated issuer cannot create an event', () => {
+  it('a deactivated issuer can still create events — the registry is a badge, not a gate', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
 
     sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
     sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+    expect(sim.getLedger().issuers.lookup(issuer1Pk).isActive).toBe(false);
 
     sim.asUser(ISSUER1_SK);
-    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).not.toThrow();
   });
 });
 
@@ -227,7 +229,10 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
     sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
     sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false); // not public mint
 
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    // The recipient's mintTo target is their per-issuer holder pseudonym,
+    // not their global caller pk — that's what tokenOwner will actually
+    // store, and what the recipient's own claimOrUpdate will look for.
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuer1Pk);
     const state = sim.asUser(ISSUER1_SK).mintTo(EVENT_A, user1Pk);
 
     expect(state.totalSupply).toBe(1n);
@@ -238,8 +243,9 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('admin can push-mint for any event', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     const state = sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
     expect(state.tokenOwner.lookup(0n)).toEqual(user1Pk);
@@ -247,8 +253,9 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('push-mint succeeds even though self-service claim is blocked for the same non-public event', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     // Self-service claim has no path when isPublicMint is false.
     expect(() => sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false)).toThrow();
@@ -258,8 +265,9 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('non-organizer, non-admin cannot push-mint', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
-    const user2Pk = sim.asUser(USER2_SK).getCallerPk();
+    const user2Pk = sim.asUser(USER2_SK).getHolderPk(adminPk);
 
     sim.asUser(USER1_SK);
     expect(() => sim.mintTo(EVENT_A, user2Pk)).toThrow();
@@ -267,9 +275,10 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('push-mint fails on inactive event', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
     sim.deactivateEvent(EVENT_A);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     sim.asUser(ADMIN_SK);
     expect(() => sim.mintTo(EVENT_A, user1Pk)).toThrow();
@@ -277,9 +286,10 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('push-mint fails when max supply is reached', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 1n, 0n, false);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
-    const user2Pk = sim.asUser(USER2_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
+    const user2Pk = sim.asUser(USER2_SK).getHolderPk(adminPk);
 
     sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
     expect(() => sim.mintTo(EVENT_A, user2Pk)).toThrow();
@@ -287,9 +297,10 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('push-mint fails if the recipient already has a token for that issuer', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
     sim.createEvent(EVENT_B, 100n, 0n, false);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
     expect(() => sim.mintTo(EVENT_B, user1Pk)).toThrow();
@@ -297,9 +308,10 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('push-minted recipient reconciles on next claimOrUpdate instead of minting a duplicate token', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
     sim.createEvent(EVENT_B, 100n, 0n, true);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
     expect(sim.getLedger().totalSupply).toBe(1n);
@@ -311,7 +323,7 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
     expect(state.totalSupply).toBe(1n);
     expect(state.tokenOwner.lookup(0n)).toEqual(user1Pk);
 
-    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
+    const adminPkHex = Buffer.from(adminPk).toString('hex');
     sim.asUser(USER1_SK);
     const ps = sim.getPrivateState();
     expect(ps.tokens[adminPkHex].tokenId).toBe(0n);
@@ -320,19 +332,104 @@ describe('POAP contract — mintTo (organizer push-mint)', () => {
 
   it('after reconciliation, subsequent claims use the fast private-cache path', () => {
     const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
     sim.createEvent(EVENT_A, 100n, 0n, false);
     sim.createEvent(EVENT_B, 100n, 0n, true);
     sim.createEvent(EVENT_C, 100n, 0n, true);
-    const user1Pk = sim.asUser(USER1_SK).getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
 
     sim.asUser(ADMIN_SK).mintTo(EVENT_A, user1Pk);
     sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false); // reconciles
     const state = sim.claimOrUpdate(EVENT_C, false); // fast path
 
     expect(state.totalSupply).toBe(1n); // still one token, never re-minted
-    const adminPkHex = Buffer.from(sim.asUser(ADMIN_SK).getCallerPk()).toString('hex');
+    const adminPkHex = Buffer.from(adminPk).toString('hex');
     sim.asUser(USER1_SK);
     expect(sim.getPrivateState().tokens[adminPkHex].attendance.eventIds).toHaveLength(2);
+  });
+});
+
+// ── Holder pseudonym unlinkability ────────────────────────────────────────────
+
+describe('POAP contract — per-issuer holder pseudonym', () => {
+  it('the same wallet gets different, uncorrelatable tokenOwner values for different issuers', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const issuer2Pk = sim.asUser(ISSUER2_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).registerIssuer(issuer1Pk);
+    sim.asUser(ADMIN_SK).registerIssuer(issuer2Pk);
+    sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(ISSUER2_SK).createEvent(EVENT_B, 100n, 0n, true);
+
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, false);
+    const stateA = sim.getLedger();
+    sim.asUser(USER1_SK).claimOrUpdate(EVENT_B, false);
+    const stateB = sim.getLedger();
+
+    const ownerForIssuer1 = stateA.tokenOwner.lookup(0n);
+    const ownerForIssuer2 = stateB.tokenOwner.lookup(1n);
+    // Same real wallet (USER1), two different on-chain pseudonyms — an
+    // observer cannot tell these two tokens belong to the same holder.
+    expect(ownerForIssuer1).not.toEqual(ownerForIssuer2);
+  });
+
+  it('the same wallet+issuer pair always derives the same holder pk (needed for reconciliation)', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
+    const first = sim.asUser(USER1_SK).getHolderPk(adminPk);
+    const second = sim.asUser(USER1_SK).getHolderPk(adminPk);
+    expect(first).toEqual(second);
+  });
+});
+
+// ── Private metadata: commit / reveal ─────────────────────────────────────────
+
+describe('POAP contract — private metadata commit/reveal', () => {
+  const NO_PRIVATE_METADATA = new Uint8Array(32);
+
+  it('event with no private part uses an all-zero commitment', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://public-only', NO_PRIVATE_METADATA);
+    expect(sim.getLedger().events.lookup(EVENT_A).privateMetadataCommit).toEqual(NO_PRIVATE_METADATA);
+  });
+
+  it('reveal succeeds when the value+rand match the on-chain commitment', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    // Stand-in for a hash of {"neighborhood":"Palermo"} computed off-chain.
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const commit = PoapSimulator.computePrivateMetadataCommit(value, rand);
+
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://buenos-aires-general', commit);
+    expect(sim.getLedger().eventRevealedMetadata.member(EVENT_A)).toBe(false);
+
+    const state = sim.revealPrivateMetadata(EVENT_A, value, rand);
+    expect(state.eventRevealedMetadata.member(EVENT_A)).toBe(true);
+    expect(state.eventRevealedMetadata.lookup(EVENT_A)).toEqual(value);
+  });
+
+  it('reveal fails with the wrong value', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const commit = PoapSimulator.computePrivateMetadataCommit(value, rand);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://buenos-aires-general', commit);
+
+    const wrongValue = new Uint8Array(32).fill(1); // e.g. "Recoleta" instead of "Palermo"
+    expect(() => sim.revealPrivateMetadata(EVENT_A, wrongValue, rand)).toThrow();
+  });
+
+  it('reveal is permissionless — anyone who knows the opening can reveal, no caller check', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const commit = PoapSimulator.computePrivateMetadataCommit(value, rand);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://buenos-aires-general', commit);
+
+    // A token holder with no admin/organizer role can still reveal, as long
+    // as they were told the (value, rand) opening off-chain.
+    const state = sim.asUser(USER1_SK).revealPrivateMetadata(EVENT_A, value, rand);
+    expect(state.eventRevealedMetadata.lookup(EVENT_A)).toEqual(value);
   });
 });
 
