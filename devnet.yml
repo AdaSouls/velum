@@ -1,6 +1,17 @@
 # Midnight Local Development Network
-# Generated: 2026-08-05T02:55:31Z
+# Generated: 2026-08-05T02:55:31Z (poap-pg merged in + indexer-standalone bumped 2026-08-13)
 # Generator: midnight-tooling plugin
+#
+# Single devnet compose file for this project — the old docker-compose.devnet.yml
+# (pre-migration node/proof-server/indexer generation) has been removed; poap-pg
+# (the indexer app's own business-data Postgres, unrelated to the Midnight SDK
+# generation) now lives here instead.
+#
+# Usage:
+#   docker compose -f devnet.yml pull   # first time
+#   docker compose -f devnet.yml up -d
+#   docker compose -f devnet.yml down
+#   docker compose -f devnet.yml down -v  # wipe data
 
 name: midnight-devnet
 
@@ -21,7 +32,7 @@ services:
       SIDECHAIN_BLOCK_BENEFICIARY: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e'
 
   indexer:
-    image: midnightntwrk/indexer-standalone:4.2.1
+    image: midnightntwrk/indexer-standalone:4.3.3
     container_name: midnight-indexer
     ports:
       - '8088:8088'
@@ -51,3 +62,25 @@ services:
       - '6300:6300'
     environment:
       RUST_BACKTRACE: 'full'
+
+  # Indexer app's own business-data Postgres (poap-state.ts / api routes) —
+  # unrelated to the Midnight SDK generation, merged in from the old
+  # docker-compose.devnet.yml (now removed).
+  poap-pg:
+    image: postgres:15
+    container_name: poap-indexer-pg
+    ports:
+      - '5434:5432'
+    environment:
+      POSTGRES_USER: 'poap'
+      POSTGRES_PASSWORD: 'poap'
+      POSTGRES_DB: 'poap_indexer'
+    volumes:
+      - poap_indexer_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U poap -d poap_indexer']
+      interval: 5s
+      retries: 10
+
+volumes:
+  poap_indexer_pg_data:

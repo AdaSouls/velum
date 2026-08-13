@@ -11,8 +11,8 @@ export const config = {
   // devnet.yml's indexer-standalone service (new-generation SDK devnet — see docs/environment.md)
   indexerWs:       process.env.MIDNIGHT_INDEXER_WS   ?? 'ws://127.0.0.1:8088/api/v4/graphql/ws',
   indexerHttp:     process.env.MIDNIGHT_INDEXER_URL   ?? 'http://127.0.0.1:8088/api/v4/graphql',
-  // The indexer app's own business-data Postgres (docker-compose.devnet.yml's poap-pg service —
-  // unrelated to Midnight SDK generation, so it stays on the old compose file)
+  // The indexer app's own business-data Postgres (devnet.yml's poap-pg service — unrelated to
+  // the Midnight SDK generation, just merged into the same compose file for convenience)
   dbUrl:           process.env.DATABASE_URL           ?? 'postgresql://poap:poap@localhost:5434/poap_indexer',
   apiPort:         Number(process.env.PORT ?? 3001),
   // Comma-separated allowlist of origins allowed to call the API cross-origin, e.g.

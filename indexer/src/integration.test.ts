@@ -12,11 +12,10 @@
  *   REST API. Requires the new-generation devnet (devnet.yml) and CONTRACT_ADDRESS to be set.
  *
  * Prerequisites (component tests):
- *   docker compose -f docker-compose.devnet.yml up -d poap-pg
+ *   docker compose -f devnet.yml up -d poap-pg
  *
  * Prerequisites (live devnet):
- *   docker compose -f devnet.yml up -d                      # node + indexer-standalone + proof-server
- *   docker compose -f docker-compose.devnet.yml up -d poap-pg  # indexer app's own Postgres
+ *   docker compose -f devnet.yml up -d          # node + indexer-standalone + proof-server + poap-pg
  *   CONTRACT_ADDRESS=<deployed-address> LIVE_DEVNET=true npm test
  */
 
@@ -150,7 +149,7 @@ beforeAll(async () => {
     await pool.query('SELECT 1');
   } catch (err) {
     console.warn('[test] Postgres not reachable — skipping integration tests');
-    console.warn('  Start it with: docker compose -f docker-compose.devnet.yml up -d poap-pg');
+    console.warn('  Start it with: docker compose -f devnet.yml up -d poap-pg');
     pool.end().catch(() => {});
     pool = null as any;
     return;
