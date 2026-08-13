@@ -151,7 +151,7 @@ async function main() {
     contractAddress,
     privateStateId: PRIVATE_STATE_ID,
     circuitId: 'createEvent',
-    args: [DEMO_EVENT_ID, 100n, 0n, true],
+    args: [DEMO_EVENT_ID, 100n, 0n, true, 'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json'],
   });
   logger.info(`Event created in block ${eventTx.public.blockHeight}, tx: ${eventTx.public.txHash}`);
 
@@ -175,6 +175,7 @@ async function main() {
 | Max Supply | 100 |
 | Expiration | None |
 | Public Mint | Yes |
+| Metadata URI | \`ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json\` |
 | Create Tx Hash | \`${eventTx.public.txHash}\` |
 | Block Height | ${eventTx.public.blockHeight} |
 `;

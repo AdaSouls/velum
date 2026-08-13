@@ -8,11 +8,12 @@ export function tokensRouter(db: Pool): Router {
   router.get('/owner/:ownerPk', async (req, res) => {
     try {
       const { rows } = await db.query(
-        `SELECT token_id, owner_pk, issuer_pk, first_event_id, is_burned,
-                minted_block, minted_tx, burned_block, burned_tx
-         FROM tokens
-         WHERE owner_pk = $1
-         ORDER BY token_id ASC`,
+        `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
+                t.minted_block, t.minted_tx, t.burned_block, t.burned_tx, e.metadata_uri
+         FROM tokens t
+         JOIN events e ON e.event_id = t.first_event_id
+         WHERE t.owner_pk = $1
+         ORDER BY t.token_id ASC`,
         [req.params.ownerPk],
       );
       res.json(rows.map(normaliseToken));
@@ -28,9 +29,11 @@ export function tokensRouter(db: Pool): Router {
       const tokenId = Number(req.params.tokenId);
       if (!Number.isFinite(tokenId)) return res.status(400).json({ error: 'invalid tokenId' });
       const { rows } = await db.query(
-        `SELECT token_id, owner_pk, issuer_pk, first_event_id, is_burned,
-                minted_block, minted_tx, burned_block, burned_tx
-         FROM tokens WHERE token_id = $1`,
+        `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
+                t.minted_block, t.minted_tx, t.burned_block, t.burned_tx, e.metadata_uri
+         FROM tokens t
+         JOIN events e ON e.event_id = t.first_event_id
+         WHERE t.token_id = $1`,
         [tokenId],
       );
       if (!rows.length) return res.status(404).json({ error: 'token not found' });
@@ -64,5 +67,6 @@ export function normaliseToken(row: Record<string, unknown>) {
     mintedTx:     row.minted_tx,
     burnedBlock:  row.burned_block ? Number(row.burned_block) : null,
     burnedTx:     row.burned_tx,
+    metadataURI:  row.metadata_uri ?? null,
   };
 }

@@ -69,6 +69,7 @@ function withEvent(
   eventId: Uint8Array,
   issuerPk: Uint8Array,
   maxSupply: bigint,
+  metadataURI: string = 'ipfs://test-metadata',
 ): LedgerView {
   const ev: EventRecord = {
     maxSupply,
@@ -77,6 +78,7 @@ function withEvent(
     organizer:  issuerPk,
     isActive:   true,
     isPublicMint: true,
+    metadataURI,
   };
   return {
     ...withIssuer(base, issuerPk),
@@ -189,7 +191,7 @@ describe('POAP indexer — component integration', () => {
     if (!pool) return;
 
     const prev = emptyLedger();
-    const curr = withEvent(prev, EVENT_A, ADMIN_PK, 100n);
+    const curr = withEvent(prev, EVENT_A, ADMIN_PK, 100n, 'ipfs://bafy-event-a-metadata');
 
     await applyStateDiff(pool, 'createEvent', prev, curr, {
       txHash: '0xaaaa0001',
@@ -206,6 +208,7 @@ describe('POAP indexer — component integration', () => {
     expect(body[0].minted).toBe(0);
     expect(body[0].isActive).toBe(true);
     expect(body[0].issuerPk).toBe(hex(ADMIN_PK));
+    expect(body[0].metadataURI).toBe('ipfs://bafy-event-a-metadata');
     expect(body[0].createdBlock).toBe(1);
   });
 
@@ -249,7 +252,7 @@ describe('POAP indexer — component integration', () => {
 
     // State before claim: event exists, no tokens
     const empty       = emptyLedger();
-    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n, 'ipfs://bafy-event-a-metadata');
 
     await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
       txHash: '0xaaaa0001',
@@ -274,6 +277,9 @@ describe('POAP indexer — component integration', () => {
     expect(tokens[0].issuerPk).toBe(hex(ADMIN_PK));
     expect(tokens[0].firstEventId).toBe(hex(EVENT_A));
     expect(tokens[0].isBurned).toBe(false);
+    // Token responses carry their event's metadataURI directly (JOIN on first_event_id) so
+    // the frontend doesn't need a second fetch to render name/description/image.
+    expect(tokens[0].metadataURI).toBe('ipfs://bafy-event-a-metadata');
     expect(tokens[0].mintedBlock).toBe(2);
   });
 
@@ -396,7 +402,7 @@ describe('POAP indexer — component integration', () => {
     if (!pool) return;
 
     const empty       = emptyLedger();
-    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n, 'ipfs://bafy-event-a-metadata');
     await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
       txHash: '0xaaaa0001', blockHeight: 1n,
     });
@@ -420,6 +426,7 @@ describe('POAP indexer — component integration', () => {
     expect(tokens.map((t) => t.ownerPk)).toEqual([hex(USER1_PK), hex(USER2_PK)]);
     expect(tokens.every((t) => t.firstEventId === hex(EVENT_A))).toBe(true);
     expect(tokens.every((t) => t.isBurned === false)).toBe(true);
+    expect(tokens.every((t) => t.metadataURI === 'ipfs://bafy-event-a-metadata')).toBe(true);
   });
 
   it('GET /api/events/:id/tokens only returns tokens of that event', async () => {

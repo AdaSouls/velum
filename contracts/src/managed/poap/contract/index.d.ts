@@ -5,7 +5,8 @@ export type EventRecord = { maxSupply: bigint;
                             expiration: bigint;
                             organizer: Uint8Array;
                             isActive: boolean;
-                            isPublicMint: boolean
+                            isPublicMint: boolean;
+                            metadataURI: string
                           };
 
 export type IssuerRecord = { organizerPk: Uint8Array; isActive: boolean };
@@ -41,7 +42,8 @@ export type ImpureCircuits<PS> = {
               eventId_0: Uint8Array,
               maxSupply_0: bigint,
               expiration_0: bigint,
-              isPublicMint_0: boolean): __compactRuntime.CircuitResults<PS, []>;
+              isPublicMint_0: boolean,
+              metadataURI_0: string): __compactRuntime.CircuitResults<PS, []>;
   deactivateEvent(context: __compactRuntime.CircuitContext<PS>,
                   eventId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   claimOrUpdate(context: __compactRuntime.CircuitContext<PS>,
@@ -65,7 +67,8 @@ export type ProvableCircuits<PS> = {
               eventId_0: Uint8Array,
               maxSupply_0: bigint,
               expiration_0: bigint,
-              isPublicMint_0: boolean): __compactRuntime.CircuitResults<PS, []>;
+              isPublicMint_0: boolean,
+              metadataURI_0: string): __compactRuntime.CircuitResults<PS, []>;
   deactivateEvent(context: __compactRuntime.CircuitContext<PS>,
                   eventId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   claimOrUpdate(context: __compactRuntime.CircuitContext<PS>,
@@ -91,7 +94,8 @@ export type Circuits<PS> = {
               eventId_0: Uint8Array,
               maxSupply_0: bigint,
               expiration_0: bigint,
-              isPublicMint_0: boolean): __compactRuntime.CircuitResults<PS, []>;
+              isPublicMint_0: boolean,
+              metadataURI_0: string): __compactRuntime.CircuitResults<PS, []>;
   deactivateEvent(context: __compactRuntime.CircuitContext<PS>,
                   eventId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   claimOrUpdate(context: __compactRuntime.CircuitContext<PS>,

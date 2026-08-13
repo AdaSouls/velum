@@ -13,7 +13,7 @@ export function eventsRouter(db: Pool): Router {
       const issuerPk = typeof req.query.issuerPk === 'string' ? req.query.issuerPk : undefined;
       const { rows } = await db.query(
         `SELECT event_id, issuer_pk, max_supply, expiration, is_active,
-                is_public_mint, minted, created_block, created_tx, deactivated_block
+                is_public_mint, metadata_uri, minted, created_block, created_tx, deactivated_block
          FROM events
          WHERE $1::text IS NULL OR issuer_pk = $1
          ORDER BY is_active DESC, created_block ASC`,
@@ -31,7 +31,7 @@ export function eventsRouter(db: Pool): Router {
     try {
       const { rows } = await db.query(
         `SELECT e.event_id, e.issuer_pk, e.max_supply, e.expiration, e.is_active,
-                e.is_public_mint, e.minted, e.created_block, e.created_tx, e.deactivated_block,
+                e.is_public_mint, e.metadata_uri, e.minted, e.created_block, e.created_tx, e.deactivated_block,
                 COUNT(t.token_id) FILTER (WHERE NOT t.is_burned) AS live_tokens
          FROM events e
          LEFT JOIN tokens t ON t.first_event_id = e.event_id
@@ -69,12 +69,13 @@ export function eventsRouter(db: Pool): Router {
 
       const includeBurned = req.query.includeBurned !== 'false';
       const { rows } = await db.query(
-        `SELECT token_id, owner_pk, issuer_pk, first_event_id, is_burned,
-                minted_block, minted_tx, burned_block, burned_tx
-         FROM tokens
-         WHERE first_event_id = $1
-           AND ($2::boolean OR NOT is_burned)
-         ORDER BY token_id ASC`,
+        `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
+                t.minted_block, t.minted_tx, t.burned_block, t.burned_tx, e.metadata_uri
+         FROM tokens t
+         JOIN events e ON e.event_id = t.first_event_id
+         WHERE t.first_event_id = $1
+           AND ($2::boolean OR NOT t.is_burned)
+         ORDER BY t.token_id ASC`,
         [req.params.eventId, includeBurned],
       );
       res.json(rows.map(normaliseToken));
@@ -95,6 +96,7 @@ function normaliseEvent(row: Record<string, unknown>) {
     expiration:     Number(row.expiration),
     isActive:       row.is_active,
     isPublicMint:   row.is_public_mint,
+    metadataURI:    row.metadata_uri,
     minted:         Number(row.minted),
     createdBlock:   row.created_block ? Number(row.created_block) : null,
     createdTx:      row.created_tx,

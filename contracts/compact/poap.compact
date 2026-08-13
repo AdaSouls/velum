@@ -11,6 +11,10 @@ export struct EventRecord {
   organizer: Bytes<32>, // issuer public key that owns this event
   isActive: Boolean,
   isPublicMint: Boolean,
+  // URI to off-chain JSON (name/description/image/…), e.g. "ipfs://<CID>". Same
+  // metadata applies to every token minted for this event — see tokenURI in
+  // OpenZeppelin's Compact NonFungibleToken module for the per-token analogue.
+  metadataURI: Opaque<"string">,
 }
 
 export struct IssuerRecord {
@@ -158,13 +162,15 @@ export circuit createEvent(
                  eventId: Bytes<32>,
                  maxSupply: Uint<64>,
                  expiration: Uint<64>,
-                 isPublicMint: Boolean
+                 isPublicMint: Boolean,
+                 metadataURI: Opaque<"string">
                  ): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
   const maxS = disclose(maxSupply);
   const exp = disclose(expiration);
   const pubMint = disclose(isPublicMint);
+  const metaURI = disclose(metadataURI);
   const issuerId = caller_pk();
   assert(is_admin() || is_active_issuer(issuerId), "Not authorized to create events");
   assert(!events.member(evId), "Event already exists");
@@ -174,7 +180,8 @@ export circuit createEvent(
                            expiration: exp,
                            organizer: issuerId,
                            isActive: true,
-                           isPublicMint: pubMint };
+                           isPublicMint: pubMint,
+                           metadataURI: metaURI };
   events.insert(evId, ev);
 }
 
@@ -190,7 +197,8 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
                                 expiration: ev.expiration,
                                 organizer: ev.organizer,
                                 isActive: false,
-                                isPublicMint: ev.isPublicMint };
+                                isPublicMint: ev.isPublicMint,
+                                metadataURI: ev.metadataURI };
   events.insert(evId, updated);
 }
 
@@ -223,7 +231,8 @@ circuit mintTokenInternal(issuerId: Bytes<32>, eventId: Bytes<32>, isSoulbound: 
                         expiration: ev.expiration,
                         organizer: ev.organizer,
                         isActive: ev.isActive,
-                        isPublicMint: ev.isPublicMint };
+                        isPublicMint: ev.isPublicMint,
+                        metadataURI: ev.metadataURI };
   events.insert(eventId, updatedEv);
 
   store_token(tokenId, issuerId, eventId, isSoulbound);
@@ -330,7 +339,8 @@ export circuit mintTo(eventId: Bytes<32>, recipientPk: Bytes<32>): [] {
                         expiration: ev.expiration,
                         organizer: ev.organizer,
                         isActive: ev.isActive,
-                        isPublicMint: ev.isPublicMint };
+                        isPublicMint: ev.isPublicMint,
+                        metadataURI: ev.metadataURI };
   events.insert(evId, updatedEv);
 }
 

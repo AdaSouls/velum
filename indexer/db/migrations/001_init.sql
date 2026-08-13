@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS events (
   expiration        BIGINT  NOT NULL DEFAULT 0,
   is_active         BOOLEAN NOT NULL DEFAULT TRUE,
   is_public_mint    BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata_uri      TEXT    NOT NULL DEFAULT '', -- off-chain JSON (name/description/image/…), e.g. "ipfs://<CID>"
   minted            BIGINT  NOT NULL DEFAULT 0,
   created_block     BIGINT,
   created_tx        TEXT,
@@ -45,6 +46,10 @@ CREATE TABLE IF NOT EXISTS tokens (
   burned_tx         TEXT,
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Idempotent upgrade path for DBs created before metadata_uri existed (CREATE TABLE IF NOT
+-- EXISTS above is a no-op against an already-initialized events table).
+ALTER TABLE events ADD COLUMN IF NOT EXISTS metadata_uri TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS tokens_owner_pk_idx  ON tokens(owner_pk);
 CREATE INDEX IF NOT EXISTS tokens_issuer_pk_idx ON tokens(issuer_pk);

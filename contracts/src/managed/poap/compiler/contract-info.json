@@ -96,6 +96,13 @@
           "type": {
             "type-name": "Boolean"
           }
+        },
+        {
+          "name": "metadataURI",
+          "type": {
+            "type-name": "Opaque",
+            "tsType": "string"
+          }
         }
       ],
       "result-type": {
@@ -453,6 +460,13 @@
             "name": "isPublicMint",
             "type": {
               "type-name": "Boolean"
+            }
+          },
+          {
+            "name": "metadataURI",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "string"
             }
           }
         ]

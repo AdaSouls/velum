@@ -103,8 +103,8 @@ async function handleEvents(
     );
     await client.query(
       `INSERT INTO events
-         (event_id, issuer_pk, max_supply, expiration, is_active, is_public_mint, minted, created_block, created_tx)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (event_id, issuer_pk, max_supply, expiration, is_active, is_public_mint, metadata_uri, minted, created_block, created_tx)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (event_id) DO NOTHING`,
       [
         toHex(k),
@@ -113,6 +113,7 @@ async function handleEvents(
         v.expiration.toString(),
         v.isActive,
         v.isPublicMint,
+        v.metadataURI,
         v.minted.toString(),
         meta.blockHeight.toString(),
         meta.txHash,

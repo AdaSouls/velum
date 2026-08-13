@@ -110,9 +110,10 @@ export class PoapSimulator {
     maxSupply: bigint,
     expiration: bigint,
     isPublicMint: boolean,
+    metadataURI: string = 'ipfs://test-metadata',
   ): Ledger {
     this.circuitContext = this.contract.impureCircuits
-      .createEvent(this.circuitContext, eventId, maxSupply, expiration, isPublicMint)
+      .createEvent(this.circuitContext, eventId, maxSupply, expiration, isPublicMint, metadataURI)
       .context;
     this.savePrivateState();
     return this.getLedger();

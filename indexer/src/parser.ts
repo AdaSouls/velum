@@ -28,6 +28,8 @@ export type EventRecord = {
   organizer: Uint8Array;
   isActive: boolean;
   isPublicMint: boolean;
+  // URI to off-chain JSON (name/description/image/…), e.g. "ipfs://<CID>".
+  metadataURI: string;
 };
 
 export type IssuerRecord = {
@@ -119,6 +121,7 @@ export function eventEquals(a: EventRecord, b: EventRecord): boolean {
     a.maxSupply === b.maxSupply &&
     a.expiration === b.expiration &&
     a.isPublicMint === b.isPublicMint &&
+    a.metadataURI === b.metadataURI &&
     toHex(a.organizer) === toHex(b.organizer)
   );
 }

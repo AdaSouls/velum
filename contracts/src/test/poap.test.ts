@@ -28,6 +28,21 @@ describe('POAP contract — createEvent', () => {
     expect(ev.minted).toBe(0n);
     expect(ev.isActive).toBe(true);
     expect(ev.isPublicMint).toBe(true);
+    expect(ev.metadataURI).toBe('ipfs://test-metadata');
+  });
+
+  it('stores a custom metadataURI and preserves it across mint/deactivate updates', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://bafy-event-a-metadata');
+    expect(sim.getLedger().events.lookup(EVENT_A).metadataURI).toBe('ipfs://bafy-event-a-metadata');
+
+    // minted counter update (mintTokenInternal rebuilds EventRecord) must not drop it
+    const afterMint = sim.asUser(USER1_SK).claimOrUpdate(EVENT_A, true);
+    expect(afterMint.events.lookup(EVENT_A).metadataURI).toBe('ipfs://bafy-event-a-metadata');
+
+    // deactivation (also rebuilds EventRecord) must not drop it either
+    const afterDeactivate = sim.asUser(ADMIN_SK).deactivateEvent(EVENT_A);
+    expect(afterDeactivate.events.lookup(EVENT_A).metadataURI).toBe('ipfs://bafy-event-a-metadata');
   });
 
   it('unregistered address cannot create an event', () => {
