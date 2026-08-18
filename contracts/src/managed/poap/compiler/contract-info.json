@@ -138,7 +138,7 @@
       }
     },
     {
-      "name": "claimOrUpdate",
+      "name": "claim",
       "pure": false,
       "proof": true,
       "arguments": [
@@ -176,6 +176,20 @@
         },
         {
           "name": "recipientPk",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "tokenMetadataURI",
+          "type": {
+            "type-name": "Opaque",
+            "tsType": "string"
+          }
+        },
+        {
+          "name": "tokenPrivateMetadataCommit",
           "type": {
             "type-name": "Bytes",
             "length": 32
@@ -293,6 +307,39 @@
         "types": [
         ]
       }
+    },
+    {
+      "name": "revealPrivateTokenMetadata",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "tokenId",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 18446744073709551615
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
     }
   ],
   "witnesses": [
@@ -303,37 +350,6 @@
       "result type": {
         "type-name": "Bytes",
         "length": 32
-      }
-    },
-    {
-      "name": "get_my_token_for_issuer",
-      "arguments": [
-        {
-          "name": "issuerId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        }
-      ],
-      "result type": {
-        "type-name": "Struct",
-        "name": "Maybe",
-        "elements": [
-          {
-            "name": "is_some",
-            "type": {
-              "type-name": "Boolean"
-            }
-          },
-          {
-            "name": "value",
-            "type": {
-              "type-name": "Uint",
-              "maxval": 18446744073709551615
-            }
-          }
-        ]
       }
     },
     {
@@ -372,59 +388,6 @@
         "types": [
         ]
       }
-    },
-    {
-      "name": "store_attendance",
-      "arguments": [
-        {
-          "name": "tokenId",
-          "type": {
-            "type-name": "Uint",
-            "maxval": 18446744073709551615
-          }
-        },
-        {
-          "name": "issuerId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
-          "name": "eventId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        }
-      ],
-      "result type": {
-        "type-name": "Tuple",
-        "types": [
-        ]
-      }
-    },
-    {
-      "name": "has_attended",
-      "arguments": [
-        {
-          "name": "issuerId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
-          "name": "eventId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        }
-      ],
-      "result type": {
-        "type-name": "Boolean"
-      }
     }
   ],
   "contracts": [
@@ -451,7 +414,7 @@
       }
     },
     {
-      "name": "tokenFirstEvent",
+      "name": "tokenEvent",
       "index": 2,
       "exported": true,
       "storage": "Map",
@@ -479,8 +442,50 @@
       }
     },
     {
-      "name": "issuerHolderToken",
+      "name": "tokenMetadataURI",
       "index": 4,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      },
+      "value": {
+        "type-name": "Opaque",
+        "tsType": "string"
+      }
+    },
+    {
+      "name": "tokenPrivateMetadataCommit",
+      "index": 5,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      },
+      "value": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "tokenRevealedMetadata",
+      "index": 6,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      },
+      "value": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "eventHolderToken",
+      "index": 7,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -494,7 +499,7 @@
     },
     {
       "name": "events",
-      "index": 5,
+      "index": 8,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -564,7 +569,7 @@
     },
     {
       "name": "eventRevealedMetadata",
-      "index": 6,
+      "index": 9,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -578,7 +583,7 @@
     },
     {
       "name": "issuers",
-      "index": 7,
+      "index": 10,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -607,7 +612,7 @@
     },
     {
       "name": "burnedTokens",
-      "index": 8,
+      "index": 11,
       "exported": true,
       "storage": "Map",
       "key": {
@@ -620,7 +625,7 @@
     },
     {
       "name": "isPaused",
-      "index": 9,
+      "index": 12,
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -629,7 +634,7 @@
     },
     {
       "name": "adminPk",
-      "index": 10,
+      "index": 13,
       "exported": true,
       "storage": "Cell",
       "type": {

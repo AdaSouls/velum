@@ -64,9 +64,13 @@ type PoapCircuits =
   | 'deactivateIssuer'
   | 'createEvent'
   | 'deactivateEvent'
-  | 'claimOrUpdate'
+  | 'claim'
   | 'mintTo'
-  | 'burn';
+  | 'burn'
+  | 'getCallerPk'
+  | 'getHolderPk'
+  | 'revealPrivateMetadata'
+  | 'revealPrivateTokenMetadata';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 

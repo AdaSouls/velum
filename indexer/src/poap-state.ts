@@ -154,7 +154,9 @@ async function handleTokens(
   for (const { k: tokenId, v: ownerPk } of
     diffMap(prevOwners, currOwners, (a, b) => toHex(a) === toHex(b)).added) {
     const issuerPk = toHex(getFromIter(curr.tokenIssuer, tokenId));
-    const firstEvent = toHex(getFromIter(curr.tokenFirstEvent, tokenId));
+    const eventId = toHex(getFromIter(curr.tokenEvent, tokenId));
+    const tokenMetadataURI = getFromIter(curr.tokenMetadataURI, tokenId);
+    const tokenPrivateMetadataCommit = toHex(getFromIter(curr.tokenPrivateMetadataCommit, tokenId));
 
     // Ensure issuer + event rows exist (may lag in same block)
     await client.query(
@@ -165,13 +167,24 @@ async function handleTokens(
       `INSERT INTO events (event_id, issuer_pk, max_supply, expiration, is_active, is_public_mint, minted)
        VALUES ($1, $2, 0, 0, TRUE, TRUE, 0)
        ON CONFLICT DO NOTHING`,
-      [firstEvent, issuerPk],
+      [eventId, issuerPk],
     );
     await client.query(
-      `INSERT INTO tokens (token_id, owner_pk, issuer_pk, first_event_id, is_burned, minted_block, minted_tx)
-       VALUES ($1,$2,$3,$4,FALSE,$5,$6)
+      `INSERT INTO tokens
+         (token_id, owner_pk, issuer_pk, first_event_id, token_metadata_uri, token_private_metadata_commit,
+          is_burned, minted_block, minted_tx)
+       VALUES ($1,$2,$3,$4,$5,$6,FALSE,$7,$8)
        ON CONFLICT (token_id) DO NOTHING`,
-      [tokenId.toString(), toHex(ownerPk), issuerPk, firstEvent, meta.blockHeight.toString(), meta.txHash],
+      [
+        tokenId.toString(),
+        toHex(ownerPk),
+        issuerPk,
+        eventId,
+        tokenMetadataURI,
+        tokenPrivateMetadataCommit,
+        meta.blockHeight.toString(),
+        meta.txHash,
+      ],
     );
     console.log(`  [+] token #${tokenId} minted → owner ${toHex(ownerPk).slice(0, 16)}…`);
   }

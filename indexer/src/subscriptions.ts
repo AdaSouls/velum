@@ -117,9 +117,11 @@ type ContractEvent  = ContractDeploy | ContractCall | ContractUpdate;
 function emptyLedger(): LedgerView {
   return {
     totalSupply: 0n,
-    tokenOwner:      [],
-    tokenFirstEvent: [],
-    tokenIssuer:     [],
+    tokenOwner:                 [],
+    tokenEvent:                 [],
+    tokenIssuer:                [],
+    tokenMetadataURI:           [],
+    tokenPrivateMetadataCommit: [],
     events:          [],
     issuers:         [],
     burnedTokens:    [],

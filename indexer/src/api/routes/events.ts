@@ -52,13 +52,9 @@ export function eventsRouter(db: Pool): Router {
   // Optional ?includeBurned=false to exclude burned tokens (default: include them, each row
   // carries isBurned so the caller can decide).
   //
-  // Scope caveat — this returns tokens whose *first* claim was this event, which is exactly what
-  // the contract records on-chain (mintTokenInternal sets tokenFirstEvent and increments the
-  // event's `minted`). A wallet that already held a token from this issuer and then claimed this
-  // event goes through updateToken instead, which only writes private ZK state (store_attendance)
-  // and touches neither tokenFirstEvent nor `minted`. Those attendances are deliberately not
-  // indexable — see GET /api/tokens/:id/attendance. So this list matches the event's `minted`
-  // count, not necessarily its total attendance.
+  // Every claim mints a brand-new token now (no more "update an existing token across events"
+  // path), so this list is complete — it matches the event's `minted` count exactly, with no
+  // untracked attendance gap like the old design had.
   router.get('/:eventId/tokens', async (req, res) => {
     try {
       const { rows: eventRows } = await db.query(
@@ -70,7 +66,8 @@ export function eventsRouter(db: Pool): Router {
       const includeBurned = req.query.includeBurned !== 'false';
       const { rows } = await db.query(
         `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
-                t.minted_block, t.minted_tx, t.burned_block, t.burned_tx, e.metadata_uri
+                t.minted_block, t.minted_tx, t.burned_block, t.burned_tx,
+                t.token_metadata_uri, t.token_private_metadata_commit, e.metadata_uri
          FROM tokens t
          JOIN events e ON e.event_id = t.first_event_id
          WHERE t.first_event_id = $1

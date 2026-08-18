@@ -39,9 +39,16 @@ export type IssuerRecord = {
 
 export type LedgerView = {
   totalSupply: bigint;
-  tokenOwner:     Iterable<[bigint,    Uint8Array]>;
-  tokenFirstEvent:Iterable<[bigint,    Uint8Array]>;
-  tokenIssuer:    Iterable<[bigint,    Uint8Array]>;
+  tokenOwner:                 Iterable<[bigint,    Uint8Array]>;
+  // Renamed from the contract's old tokenFirstEvent: every claim now mints a
+  // brand-new token (no more "update an existing token across events"), so a
+  // token maps to exactly one event, permanently — "first" no longer applies.
+  tokenEvent:                 Iterable<[bigint,    Uint8Array]>;
+  tokenIssuer:                Iterable<[bigint,    Uint8Array]>;
+  // URI to off-chain JSON for this specific token (inherited from the event
+  // at claim time, or personalized per-recipient via mintTo).
+  tokenMetadataURI:           Iterable<[bigint,    string]>;
+  tokenPrivateMetadataCommit: Iterable<[bigint,    Uint8Array]>;
   events:         Iterable<[Uint8Array, EventRecord]>;
   issuers:        Iterable<[Uint8Array, IssuerRecord]>;
   burnedTokens:   Iterable<[bigint,    boolean]>;

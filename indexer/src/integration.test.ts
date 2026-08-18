@@ -41,10 +41,12 @@ function bytes(fill: number): Uint8Array { return new Uint8Array(32).fill(fill);
 
 function emptyLedger(): LedgerView {
   return {
-    totalSupply:     0n,
-    tokenOwner:      [],
-    tokenFirstEvent: [],
-    tokenIssuer:     [],
+    totalSupply:                0n,
+    tokenOwner:                 [],
+    tokenEvent:                 [],
+    tokenIssuer:                [],
+    tokenMetadataURI:           [],
+    tokenPrivateMetadataCommit: [],
     events:          [],
     issuers:         [],
     burnedTokens:    [],
@@ -93,16 +95,20 @@ function withToken(
   tokenId: bigint,
   ownerPk: Uint8Array,
   issuerPk: Uint8Array,
-  firstEventId: Uint8Array,
+  eventId: Uint8Array,
+  tokenMetadataURI: string = 'ipfs://test-metadata',
+  tokenPrivateMetadataCommit: Uint8Array = new Uint8Array(32),
 ): LedgerView {
   return {
     ...base,
     totalSupply: base.totalSupply + 1n,
-    tokenOwner:      [...(base.tokenOwner      as Array<[bigint, Uint8Array]>), [tokenId, ownerPk]],
-    tokenFirstEvent: [...(base.tokenFirstEvent as Array<[bigint, Uint8Array]>), [tokenId, firstEventId]],
-    tokenIssuer:     [...(base.tokenIssuer     as Array<[bigint, Uint8Array]>), [tokenId, issuerPk]],
+    tokenOwner:                 [...(base.tokenOwner                 as Array<[bigint, Uint8Array]>), [tokenId, ownerPk]],
+    tokenEvent:                 [...(base.tokenEvent                 as Array<[bigint, Uint8Array]>), [tokenId, eventId]],
+    tokenIssuer:                [...(base.tokenIssuer                as Array<[bigint, Uint8Array]>), [tokenId, issuerPk]],
+    tokenMetadataURI:           [...(base.tokenMetadataURI           as Array<[bigint, string]>), [tokenId, tokenMetadataURI]],
+    tokenPrivateMetadataCommit: [...(base.tokenPrivateMetadataCommit as Array<[bigint, Uint8Array]>), [tokenId, tokenPrivateMetadataCommit]],
     events: (base.events as Array<[Uint8Array, EventRecord]>).map(([id, ev]) =>
-      Buffer.from(id).equals(Buffer.from(firstEventId))
+      Buffer.from(id).equals(Buffer.from(eventId))
         ? [id, { ...ev, minted: ev.minted + 1n }]
         : [id, ev],
     ),
@@ -261,7 +267,7 @@ describe('POAP indexer — component integration', () => {
     // State after claim: token #1 minted to user1
     const afterClaim = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
 
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim, {
       txHash: '0xbbbb0002',
       blockHeight: 2n,
     });
@@ -282,28 +288,31 @@ describe('POAP indexer — component integration', () => {
     expect(tokens[0].mintedBlock).toBe(2);
   });
 
-  it('second claimOrUpdate by same user does not create a second token', async () => {
+  it('claiming a second event from the same issuer mints a SEPARATE token (no more "update" path)', async () => {
     if (!pool) return;
 
     const empty       = emptyLedger();
-    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    const afterCreate = withEvent(withEvent(empty, EVENT_A, ADMIN_PK, 100n), EVENT_B, ADMIN_PK, 100n);
     await applyStateDiff(pool, 'createEvent', empty, afterCreate, {
       txHash: '0xaaaa0001', blockHeight: 1n,
     });
 
     const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim1, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
 
-    // Second claimOrUpdate — updateToken path, no new tokenOwner entry
-    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim1, {
+    // Same wallet, same issuer, different event — a brand-new token now,
+    // not an update to token #1.
+    const afterClaim2 = withToken(afterClaim1, 2n, USER1_PK, ADMIN_PK, EVENT_B);
+    await applyStateDiff(pool, 'claim', afterClaim1, afterClaim2, {
       txHash: '0xcccc0003', blockHeight: 3n,
     });
 
     const res    = await fetch(`${apiBase}/api/tokens/owner/${hex(USER1_PK)}`);
     const tokens = await res.json() as any[];
-    expect(tokens).toHaveLength(1);
+    expect(tokens).toHaveLength(2);
+    expect(tokens.map((t) => t.tokenId).sort()).toEqual([1, 2]);
   });
 
   it('two users claiming the same event each get their own token', async () => {
@@ -316,12 +325,12 @@ describe('POAP indexer — component integration', () => {
     });
 
     const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim1, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
 
     const afterClaim2 = withToken(afterClaim1, 2n, USER2_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim2, {
+    await applyStateDiff(pool, 'claim', afterClaim1, afterClaim2, {
       txHash: '0xcccc0003', blockHeight: 3n,
     });
 
@@ -347,7 +356,7 @@ describe('POAP indexer — component integration', () => {
     });
 
     const afterClaim = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
 
@@ -407,12 +416,12 @@ describe('POAP indexer — component integration', () => {
     });
 
     const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim1, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
 
     const afterClaim2 = withToken(afterClaim1, 2n, USER2_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim2, {
+    await applyStateDiff(pool, 'claim', afterClaim1, afterClaim2, {
       txHash: '0xcccc0003', blockHeight: 3n,
     });
 
@@ -440,11 +449,11 @@ describe('POAP indexer — component integration', () => {
 
     // user1 claims EVENT_A, user2 claims EVENT_B
     const afterClaimA = withToken(withAB,      1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', withAB, afterClaimA, {
+    await applyStateDiff(pool, 'claim', withAB, afterClaimA, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
     const afterClaimB = withToken(afterClaimA, 2n, USER2_PK, ADMIN_PK, EVENT_B);
-    await applyStateDiff(pool, 'claimOrUpdate', afterClaimA, afterClaimB, {
+    await applyStateDiff(pool, 'claim', afterClaimA, afterClaimB, {
       txHash: '0xcccc0003', blockHeight: 3n,
     });
 
@@ -467,11 +476,11 @@ describe('POAP indexer — component integration', () => {
     });
 
     const afterClaim1 = withToken(afterCreate, 1n, USER1_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterCreate, afterClaim1, {
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim1, {
       txHash: '0xbbbb0002', blockHeight: 2n,
     });
     const afterClaim2 = withToken(afterClaim1, 2n, USER2_PK, ADMIN_PK, EVENT_A);
-    await applyStateDiff(pool, 'claimOrUpdate', afterClaim1, afterClaim2, {
+    await applyStateDiff(pool, 'claim', afterClaim1, afterClaim2, {
       txHash: '0xcccc0003', blockHeight: 3n,
     });
 

@@ -138,9 +138,12 @@ export class PoapSimulator {
 
   // ── Tokens ────────────────────────────────────────────────────────────────
 
-  claimOrUpdate(eventId: Uint8Array, isSoulbound: boolean): Ledger {
+  // Mints a brand-new token to the caller for this event every time — no
+  // more "update an existing token" path. Fails if the caller already
+  // claimed this specific event.
+  claim(eventId: Uint8Array, isSoulbound: boolean): Ledger {
     this.circuitContext = this.contract.impureCircuits
-      .claimOrUpdate(this.circuitContext, eventId, isSoulbound)
+      .claim(this.circuitContext, eventId, isSoulbound)
       .context;
     this.savePrivateState();
     return this.getLedger();
@@ -164,12 +167,27 @@ export class PoapSimulator {
     return this.getLedger();
   }
 
-  // Organizer- or admin-initiated mint directly to a recipient's public key.
-  // Does not touch the caller's private state (the recipient's wallet
-  // reconciles it on its next claimOrUpdate call).
-  mintTo(eventId: Uint8Array, recipientPk: Uint8Array): Ledger {
+  revealPrivateTokenMetadata(tokenId: bigint, value: Uint8Array, rand: Uint8Array): Ledger {
     this.circuitContext = this.contract.impureCircuits
-      .mintTo(this.circuitContext, eventId, recipientPk)
+      .revealPrivateTokenMetadata(this.circuitContext, tokenId, value, rand)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
+  // Organizer- or admin-initiated mint directly to a recipient's public key,
+  // with metadata the organizer chooses for that specific token. Does not
+  // touch the caller's private state — the recipient discovers the token
+  // via the indexer / getHolderPk, not via a reconciliation step (there
+  // isn't one anymore).
+  mintTo(
+    eventId: Uint8Array,
+    recipientPk: Uint8Array,
+    tokenMetadataURI: string = 'ipfs://test-metadata',
+    tokenPrivateMetadataCommit: Uint8Array = new Uint8Array(32),
+  ): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .mintTo(this.circuitContext, eventId, recipientPk, tokenMetadataURI, tokenPrivateMetadataCommit)
       .context;
     this.savePrivateState();
     return this.getLedger();
