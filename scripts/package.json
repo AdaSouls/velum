@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "tsx deploy.ts"
+    "deploy": "tsx deploy.ts",
+    "wallet-info": "tsx wallet-info.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.16.0",
