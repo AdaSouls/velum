@@ -7,6 +7,6 @@
     "indexer"
   ],
   "overrides": {
-    "@midnight-ntwrk/onchain-runtime-v3": "3.1.0"
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0"
   }
 }

@@ -9,6 +9,7 @@
  *   CONTRACT_ADDRESS    — deployed contract address
  *   DATABASE_URL        — postgresql://user:pass@host:port/dbname
  *   MIDNIGHT_INDEXER_WS — ws://…/api/v4/graphql/ws  (default: localhost:8088, devnet.yml)
+ *   MIDNIGHT_NETWORK_ID — network the above indexer belongs to (default: 'undeployed')
  *   PORT                — REST API port (default: 3001)
  */
 
@@ -23,14 +24,17 @@ if (!globalThis.crypto) {
 globalThis.WebSocket = WebSocket;
 
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-setNetworkId('undeployed');
+import { config } from './config.js';
+// Must match whichever network MIDNIGHT_INDEXER_WS/MIDNIGHT_INDEXER_URL actually point at — was
+// hardcoded to 'undeployed' unconditionally until 2026-08-29, silently wrong (affects address
+// encoding/decoding and ledger state parsing) for any indexer pointed at a real network.
+setNetworkId(config.networkId);
 
 import { pool, runMigrations } from './db.js';
 import { buildClient } from './client.js';
 import { startSubscription } from './subscriptions.js';
 import { startApiServer } from './api/index.js';
 import { initContractModule } from './parser.js';
-import { config } from './config.js';
 
 async function main() {
   console.log('=== AdaSouls POAP Indexer ===');
