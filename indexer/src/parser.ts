@@ -30,6 +30,13 @@ export type EventRecord = {
   isPublicMint: boolean;
   // URI to off-chain JSON (name/description/image/…), e.g. "ipfs://<CID>".
   metadataURI: string;
+  // Merkle root over independently-committed private attributes (see
+  // proveAttributeMembership in poap.compact) — all-zero means none
+  // committed. NOTE: privateMetadataCommit (the older single-blob commit)
+  // is also on-chain but was never added to this type or to eventEquals —
+  // a pre-existing gap, not introduced here; the indexer has never tracked
+  // it. Fix alongside this if/when that's revisited.
+  privateAttributesRoot: Uint8Array;
 };
 
 export type IssuerRecord = {
@@ -52,6 +59,12 @@ export type LedgerView = {
   events:         Iterable<[Uint8Array, EventRecord]>;
   issuers:        Iterable<[Uint8Array, IssuerRecord]>;
   burnedTokens:   Iterable<[bigint,    boolean]>;
+  // Nullifiers spent via proveAttributeMembershipOnce (selective disclosure,
+  // single-use variant). proveAttributeMembership itself (the stateless,
+  // typical-case predicate proof) never touches ledger state, so it never
+  // appears in any diff here — by design, the indexer has no visibility
+  // into ordinary disclosure proofs at all.
+  usedDisclosures: Iterable<[Uint8Array, boolean]>;
   isPaused: boolean;
   adminPk: Uint8Array;
 };
@@ -129,6 +142,7 @@ export function eventEquals(a: EventRecord, b: EventRecord): boolean {
     a.expiration === b.expiration &&
     a.isPublicMint === b.isPublicMint &&
     a.metadataURI === b.metadataURI &&
-    toHex(a.organizer) === toHex(b.organizer)
+    toHex(a.organizer) === toHex(b.organizer) &&
+    toHex(a.privateAttributesRoot) === toHex(b.privateAttributesRoot)
   );
 }

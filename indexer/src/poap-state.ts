@@ -33,6 +33,7 @@ export async function applyStateDiff(
     await handleIssuers(client, prev, curr, meta);
     await handleEvents(client, prev, curr, meta);
     await handleTokens(client, prev, curr, meta);
+    await handleDisclosures(client, prev, curr, meta);
     await client.query('COMMIT');
     console.log(`[state] ${operation} @ block ${meta.blockHeight} tx ${meta.txHash.slice(0, 16)}…`);
   } catch (err) {
@@ -103,8 +104,9 @@ async function handleEvents(
     );
     await client.query(
       `INSERT INTO events
-         (event_id, issuer_pk, max_supply, expiration, is_active, is_public_mint, metadata_uri, minted, created_block, created_tx)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         (event_id, issuer_pk, max_supply, expiration, is_active, is_public_mint, metadata_uri, minted,
+          private_attributes_root, created_block, created_tx)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (event_id) DO NOTHING`,
       [
         toHex(k),
@@ -115,6 +117,7 @@ async function handleEvents(
         v.isPublicMint,
         v.metadataURI,
         v.minted.toString(),
+        toHex(v.privateAttributesRoot),
         meta.blockHeight.toString(),
         meta.txHash,
       ],
@@ -201,6 +204,38 @@ async function handleTokens(
       [meta.blockHeight.toString(), meta.txHash, tokenId.toString()],
     );
     console.log(`  [-] token #${tokenId} burned`);
+  }
+}
+
+// ── Selective Disclosure ─────────────────────────────────────────────────────────
+//
+// Only tracks proveAttributeMembershipOnce redemptions (the nullifier-guarded,
+// single-use variant). The stateless proveAttributeMembership — the one
+// most "answer a question" flows should use — never mutates usedDisclosures
+// (or any other ledger map), so it produces no diff and this handler never
+// sees it. That's intentional: this table can only ever record that SOME
+// disclosure was redeemed against a nullifier, never who, which event, or
+// which attribute — the app layer learns nothing beyond what the contract
+// itself discloses.
+
+async function handleDisclosures(
+  client: PoolClient,
+  prev: LedgerView,
+  curr: LedgerView,
+  meta: TxMeta,
+): Promise<void> {
+  const prevSnap = snapshotMap(prev.usedDisclosures, (bytes) => toHex(bytes));
+  const currSnap = snapshotMap(curr.usedDisclosures, (bytes) => toHex(bytes));
+  const diff = diffMap(prevSnap, currSnap, (a, b) => a === b);
+
+  for (const { k } of diff.added) {
+    await client.query(
+      `INSERT INTO disclosure_nullifiers (nullifier, spent_block, spent_tx)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (nullifier) DO NOTHING`,
+      [toHex(k), meta.blockHeight.toString(), meta.txHash],
+    );
+    console.log(`  [+] disclosure nullifier ${toHex(k).slice(0, 16)}… spent`);
   }
 }
 

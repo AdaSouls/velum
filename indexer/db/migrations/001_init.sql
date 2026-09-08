@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS events (
   is_public_mint    BOOLEAN NOT NULL DEFAULT TRUE,
   metadata_uri      TEXT    NOT NULL DEFAULT '', -- off-chain JSON (name/description/image/…), e.g. "ipfs://<CID>"
   minted            BIGINT  NOT NULL DEFAULT 0,
+  -- hex of the EventRecord.privateAttributesRoot Merkle root (see
+  -- proveAttributeMembership in poap.compact); all-zero = no private
+  -- attributes committed. Informational only — the indexer never sees the
+  -- attribute values or the disclosure proofs made against this root.
+  private_attributes_root TEXT NOT NULL DEFAULT '',
   created_block     BIGINT,
   created_tx        TEXT,
   deactivated_block BIGINT,
@@ -52,9 +57,21 @@ CREATE TABLE IF NOT EXISTS tokens (
   created_at                    TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Selective disclosure: nullifiers spent via proveAttributeMembershipOnce (the
+-- single-use variant only — see handleDisclosures in poap-state.ts). By
+-- design this table carries no eventId/fieldId/holder columns: the contract
+-- never discloses them, so the indexer has nothing to store for them.
+CREATE TABLE IF NOT EXISTS disclosure_nullifiers (
+  nullifier   TEXT    PRIMARY KEY,      -- hex of Bytes[32]
+  spent_block BIGINT,
+  spent_tx    TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Idempotent upgrade path for columns added after the initial table creation (CREATE TABLE IF
 -- NOT EXISTS above is a no-op against an already-initialized table).
 ALTER TABLE events ADD COLUMN IF NOT EXISTS metadata_uri TEXT NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS private_attributes_root TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS token_metadata_uri TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS token_private_metadata_commit TEXT NOT NULL DEFAULT '';
 

@@ -18,6 +18,14 @@ export struct EventRecord {
   // Commitment to a private-fields digest (see computePrivateMetadataCommit /
   // revealPrivateMetadata below). All-zero Bytes<32> means "no private part".
   privateMetadataCommit: Bytes<32>,
+  // Merkle root over independently-committed private ATTRIBUTES (e.g.
+  // location, category, capacity-tier), each a leaf computed by
+  // attribute_leaf_hash/computeAttributeLeaf below. Unlike
+  // privateMetadataCommit (one blob, reveal-all-or-nothing), this lets the
+  // organizer prove or reveal ONE field at a time — see
+  // proveAttributeMembership. All-zero Bytes<32> means "no attributes
+  // committed for this event".
+  privateAttributesRoot: Bytes<32>,
 }
 
 export struct IssuerRecord {
@@ -75,6 +83,15 @@ export ledger issuers: Map<Bytes<32>, IssuerRecord>;
 
 // tokenId → burned flag (true = burned)
 export ledger burnedTokens: Map<Uint<64>, Boolean>;
+
+// Nullifiers spent by proveAttributeMembershipOnce — guards single-use
+// selective-disclosure proofs (e.g. "redeem a perk once for proving X")
+// against replay, without revealing which wallet, which event, or which
+// attribute the disclosure was about. Most disclosures should use the
+// stateless proveAttributeMembership instead and never touch this map —
+// only use the Once variant when a disclosure must provably happen at most
+// once. See disclosure_nullifier below.
+export ledger usedDisclosures: Map<Bytes<32>, Boolean>;
 
 // Contract-level pause flag
 export ledger isPaused: Boolean;
@@ -189,13 +206,19 @@ export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
 // (value, rand) opening with — see computePrivateMetadataCommit and
 // revealPrivateMetadata. Pass an all-zero Bytes<32> for a fully public
 // event with no private part.
+//
+// privateAttributesRoot is the analogous commitment for independently
+// provable/revealable FIELDS (see computeAttributeLeaf and
+// proveAttributeMembership) — pass an all-zero Bytes<32> if the event has
+// no such structured attributes.
 export circuit createEvent(
                  eventId: Bytes<32>,
                  maxSupply: Uint<64>,
                  expiration: Uint<64>,
                  isPublicMint: Boolean,
                  metadataURI: Opaque<"string">,
-                 privateMetadataCommit: Bytes<32>
+                 privateMetadataCommit: Bytes<32>,
+                 privateAttributesRoot: Bytes<32>
                  ): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
@@ -204,6 +227,7 @@ export circuit createEvent(
   const pubMint = disclose(isPublicMint);
   const metaURI = disclose(metadataURI);
   const privCommit = disclose(privateMetadataCommit);
+  const attrRoot = disclose(privateAttributesRoot);
   const issuerId = caller_pk();
   assert(!events.member(evId), "Event already exists");
 
@@ -214,7 +238,8 @@ export circuit createEvent(
                            isActive: true,
                            isPublicMint: pubMint,
                            metadataURI: metaURI,
-                           privateMetadataCommit: privCommit };
+                           privateMetadataCommit: privCommit,
+                           privateAttributesRoot: attrRoot };
   events.insert(evId, ev);
 }
 
@@ -232,7 +257,8 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
                                 isActive: false,
                                 isPublicMint: ev.isPublicMint,
                                 metadataURI: ev.metadataURI,
-                                privateMetadataCommit: ev.privateMetadataCommit };
+                                privateMetadataCommit: ev.privateMetadataCommit,
+                                privateAttributesRoot: ev.privateAttributesRoot };
   events.insert(evId, updated);
 }
 
@@ -278,7 +304,8 @@ circuit mintTokenTo(
                         isActive: ev.isActive,
                         isPublicMint: ev.isPublicMint,
                         metadataURI: ev.metadataURI,
-                        privateMetadataCommit: ev.privateMetadataCommit };
+                        privateMetadataCommit: ev.privateMetadataCommit,
+                        privateAttributesRoot: ev.privateAttributesRoot };
   events.insert(eventId, updatedEv);
 
   return tokenId;
@@ -405,4 +432,146 @@ export circuit revealPrivateTokenMetadata(tokenId: Uint<64>, value: Bytes<32>, r
   const commit = persistentCommit<Bytes<32>>(val, r);
   assert(commit == tokenPrivateMetadataCommit.lookup(tId), "Value does not match the committed metadata");
   tokenRevealedMetadata.insert(tId, val);
+}
+
+// ── Selective Disclosure: Attribute Membership Proofs ────────────────────────
+//
+// revealPrivateMetadata/revealPrivateTokenMetadata above are "Channel A":
+// whoever knows the opening can publish it, and once published it is public
+// forever, to everyone. That is the right tool when the organizer WANTS the
+// content to eventually become public knowledge.
+//
+// The circuits below are "Channel B": prove a PREDICATE about a hidden
+// attribute (e.g. "this event's country is in the EU") to whoever you send
+// this specific proof to, without ever disclosing the attribute's actual
+// value on-chain, and without touching eventRevealedMetadata at all. The
+// value/rand opening stays a witness inside the ZK argument — it never
+// appears in the public transaction transcript.
+//
+// Depths below are fixed at compile time (Compact has no dynamic-length
+// arrays) — this is the same fixed-max-depth tradeoff every production ZK
+// Merkle scheme makes, not a limitation specific to this design:
+//   ATTR_DEPTH = 8  → up to 256 attribute leaves committed per event
+//   SET_DEPTH  = 16 → up to 65536 members in a verifier-supplied public set
+// publicSetRoot is NOT contract state — it is supplied by the caller,
+// because the "set" being checked against (e.g. "EU country codes") is
+// whatever the party asking the question defines for their own request; the
+// contract does not need to know or store it.
+//
+// Confirmed against compactc 0.31.1: merkleTreePathRoot<#n, T>(path) returns
+// MerkleTreeDigest ({ field: Field }), not Bytes<32> — use
+// upgradeFromTransient(digest.field) to get a Bytes<32> back for comparison
+// against ledger-stored roots.
+
+// Internal leaf hash — binds fieldId to the same (value, rand) commit
+// scheme already used for privateMetadataCommit, so a single opening can't
+// be replayed under a different fieldId. value/rand are NEVER disclosed
+// here: this circuit is only ever called from inside another circuit that
+// keeps them as witnesses.
+circuit attribute_leaf_hash(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>(
+           [fieldId, persistentCommit<Bytes<32>>(value, rand)]
+           );
+}
+
+// Pure off-chain helper (organizer tooling): precompute the exact leaf the
+// chain will check, so the organizer can build their attribute Merkle tree
+// client-side before calling createEvent. Unlike attribute_leaf_hash, this
+// version discloses its own inputs — the organizer already knows their own
+// field values; disclose() here only satisfies taint-tracking so the
+// result can be used outside a circuit, it does not leak anything new.
+export circuit computeAttributeLeaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return attribute_leaf_hash(disclose(fieldId), disclose(value), disclose(rand));
+}
+
+// Proves that a hidden attribute of `eventId` (identified by `fieldId`,
+// opened via `value`/`rand`) is a member of `publicSetRoot` — a Merkle root
+// the CALLER supplies (typically handed to them by whoever asked the
+// question, e.g. "here is the root of the set of EU country-code hashes").
+// Returns true/false; never inserts anything into ledger state. Per the
+// Compact circuit classification already used elsewhere in this contract
+// (getCallerPk/getHolderPk are witness-only and need no proof; anything
+// that reads ledger state like `events` becomes a ProvableCircuit), this
+// circuit DOES require proof generation and a submitted transaction, same
+// as revealPrivateMetadata — it does not mutate state, but it still needs a
+// ZK argument because a third party must be able to trust the result
+// without trusting the caller. See the Selective Disclosure design note
+// above the module for the open question of whether the resulting proof
+// can also be verified fully offline (unconfirmed pending a toolchain
+// spike) — this circuit works either way; only how the proof gets to the
+// verifier would change.
+export circuit proveAttributeMembership(
+                 eventId: Bytes<32>,
+                 fieldId: Bytes<32>,
+                 value: Bytes<32>,
+                 rand: Bytes<32>,
+                 attributePath: MerkleTreePath<8, Bytes<32>>,
+                 publicSetRoot: Bytes<32>,
+                 setMembershipPath: MerkleTreePath<16, Bytes<32>>
+                 ): Boolean {
+  const evId = disclose(eventId);
+  const fId = disclose(fieldId);
+  const setRoot = disclose(publicSetRoot);
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+
+  // 1. The hidden (value, rand) opening really is one of this event's
+  //    committed attribute leaves — value/rand never leave the circuit.
+  // merkleTreePathRoot returns MerkleTreeDigest ({ field: Field }), not
+  // Bytes<32> — upgradeFromTransient converts its .field back to Bytes<32>
+  // so it can be compared against the Bytes<32> root stored in EventRecord.
+  const leaf = attribute_leaf_hash(fId, value, rand);
+  assert(attributePath.leaf == leaf, "Path does not match the recomputed leaf");
+  const attrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field);
+  assert(attrRoot == ev.privateAttributesRoot, "Attribute not committed for this event");
+
+  // 2. The SAME hidden value is also a member of the caller-supplied
+  //    public set (e.g. "is a member of {EU country codes}") — again
+  //    without disclosing which member it is.
+  assert(setMembershipPath.leaf == value, "Set path does not match the hidden value");
+  const computedSetRoot = upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field);
+  assert(computedSetRoot == setRoot, "Value is not a member of the given public set");
+
+  return true;
+}
+
+// Per-(verifier, request) nullifier — same per-context pseudonym trick as
+// holder_pk, so redeeming a disclosure to one verifier can't be linked to
+// redeeming a different disclosure to a different verifier, or to this
+// wallet's other on-chain activity.
+circuit disclosure_nullifier(verifierId: Bytes<32>, requestId: Bytes<32>): Bytes<32> {
+  return disclose(persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:disclosure:v1:"), local_sk(),
+            persistentHash<Vector<2, Bytes<32>>>([verifierId, requestId])]
+           ));
+}
+
+// Single-use variant of proveAttributeMembership: same predicate check,
+// plus a nullifier recorded in usedDisclosures so this exact
+// (wallet, verifier, request) combination cannot be redeemed twice. Only
+// use this when a disclosure must provably happen at most once (e.g.
+// redeeming a perk) — it costs a state write and reveals (only to someone
+// who already knows verifierId/requestId) that SOME disclosure for that
+// request was redeemed. Most "just answer the question" flows should call
+// proveAttributeMembership directly instead and skip this entirely.
+export circuit proveAttributeMembershipOnce(
+                 eventId: Bytes<32>,
+                 fieldId: Bytes<32>,
+                 value: Bytes<32>,
+                 rand: Bytes<32>,
+                 attributePath: MerkleTreePath<8, Bytes<32>>,
+                 publicSetRoot: Bytes<32>,
+                 setMembershipPath: MerkleTreePath<16, Bytes<32>>,
+                 verifierId: Bytes<32>,
+                 requestId: Bytes<32>
+                 ): [] {
+  assert(!isPaused, "Contract is paused");
+  const holds = proveAttributeMembership(
+                  eventId, fieldId, value, rand,
+                  attributePath, publicSetRoot, setMembershipPath
+                  );
+  assert(holds, "Predicate does not hold");
+  const n = disclosure_nullifier(verifierId, requestId);
+  assert(!usedDisclosures.member(n), "Disclosure already redeemed for this request");
+  usedDisclosures.insert(n, true);
 }

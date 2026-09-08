@@ -50,6 +50,7 @@ function emptyLedger(): LedgerView {
     events:          [],
     issuers:         [],
     burnedTokens:    [],
+    usedDisclosures: [],
     isPaused:        false,
     adminPk:         new Uint8Array(32),
   };
@@ -71,6 +72,7 @@ function withEvent(
   issuerPk: Uint8Array,
   maxSupply: bigint,
   metadataURI: string = 'ipfs://test-metadata',
+  privateAttributesRoot: Uint8Array = new Uint8Array(32),
 ): LedgerView {
   const ev: EventRecord = {
     maxSupply,
@@ -80,6 +82,7 @@ function withEvent(
     isActive:   true,
     isPublicMint: true,
     metadataURI,
+    privateAttributesRoot,
   };
   return {
     ...withIssuer(base, issuerPk),
@@ -393,6 +396,8 @@ describe('POAP indexer — component integration', () => {
         organizer:    ADMIN_PK,
         isActive:     false,
         isPublicMint: true,
+        metadataURI:  'ipfs://test-metadata',
+        privateAttributesRoot: new Uint8Array(32),
       }]],
     };
     await applyStateDiff(pool, 'deactivateEvent', afterCreate, afterDeactivate, {

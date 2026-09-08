@@ -110,6 +110,13 @@
             "type-name": "Bytes",
             "length": 32
           }
+        },
+        {
+          "name": "privateAttributesRoot",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
         }
       ],
       "result-type": {
@@ -329,6 +336,344 @@
         },
         {
           "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "computeAttributeLeaf",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "fieldId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "proveAttributeMembership",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "fieldId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "attributePath",
+          "type": {
+            "type-name": "Struct",
+            "name": "MerkleTreePath",
+            "elements": [
+              {
+                "name": "leaf",
+                "type": {
+                  "type-name": "Bytes",
+                  "length": 32
+                }
+              },
+              {
+                "name": "path",
+                "type": {
+                  "type-name": "Vector",
+                  "length": 8,
+                  "type": {
+                    "type-name": "Struct",
+                    "name": "MerkleTreePathEntry",
+                    "elements": [
+                      {
+                        "name": "sibling",
+                        "type": {
+                          "type-name": "Struct",
+                          "name": "MerkleTreeDigest",
+                          "elements": [
+                            {
+                              "name": "field",
+                              "type": {
+                                "type-name": "Field"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "goes_left",
+                        "type": {
+                          "type-name": "Boolean"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "publicSetRoot",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "setMembershipPath",
+          "type": {
+            "type-name": "Struct",
+            "name": "MerkleTreePath",
+            "elements": [
+              {
+                "name": "leaf",
+                "type": {
+                  "type-name": "Bytes",
+                  "length": 32
+                }
+              },
+              {
+                "name": "path",
+                "type": {
+                  "type-name": "Vector",
+                  "length": 16,
+                  "type": {
+                    "type-name": "Struct",
+                    "name": "MerkleTreePathEntry",
+                    "elements": [
+                      {
+                        "name": "sibling",
+                        "type": {
+                          "type-name": "Struct",
+                          "name": "MerkleTreeDigest",
+                          "elements": [
+                            {
+                              "name": "field",
+                              "type": {
+                                "type-name": "Field"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "goes_left",
+                        "type": {
+                          "type-name": "Boolean"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "proveAttributeMembershipOnce",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "fieldId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "rand",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "attributePath",
+          "type": {
+            "type-name": "Struct",
+            "name": "MerkleTreePath",
+            "elements": [
+              {
+                "name": "leaf",
+                "type": {
+                  "type-name": "Bytes",
+                  "length": 32
+                }
+              },
+              {
+                "name": "path",
+                "type": {
+                  "type-name": "Vector",
+                  "length": 8,
+                  "type": {
+                    "type-name": "Struct",
+                    "name": "MerkleTreePathEntry",
+                    "elements": [
+                      {
+                        "name": "sibling",
+                        "type": {
+                          "type-name": "Struct",
+                          "name": "MerkleTreeDigest",
+                          "elements": [
+                            {
+                              "name": "field",
+                              "type": {
+                                "type-name": "Field"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "goes_left",
+                        "type": {
+                          "type-name": "Boolean"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "publicSetRoot",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "setMembershipPath",
+          "type": {
+            "type-name": "Struct",
+            "name": "MerkleTreePath",
+            "elements": [
+              {
+                "name": "leaf",
+                "type": {
+                  "type-name": "Bytes",
+                  "length": 32
+                }
+              },
+              {
+                "name": "path",
+                "type": {
+                  "type-name": "Vector",
+                  "length": 16,
+                  "type": {
+                    "type-name": "Struct",
+                    "name": "MerkleTreePathEntry",
+                    "elements": [
+                      {
+                        "name": "sibling",
+                        "type": {
+                          "type-name": "Struct",
+                          "name": "MerkleTreeDigest",
+                          "elements": [
+                            {
+                              "name": "field",
+                              "type": {
+                                "type-name": "Field"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "goes_left",
+                        "type": {
+                          "type-name": "Boolean"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "verifierId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "requestId",
           "type": {
             "type-name": "Bytes",
             "length": 32
@@ -563,6 +908,13 @@
               "type-name": "Bytes",
               "length": 32
             }
+          },
+          {
+            "name": "privateAttributesRoot",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
           }
         ]
       }
@@ -624,8 +976,21 @@
       }
     },
     {
-      "name": "isPaused",
+      "name": "usedDisclosures",
       "index": 12,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "isPaused",
+      "index": 13,
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -634,7 +999,7 @@
     },
     {
       "name": "adminPk",
-      "index": 13,
+      "index": 14,
       "exported": true,
       "storage": "Cell",
       "type": {

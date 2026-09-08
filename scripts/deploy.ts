@@ -309,13 +309,15 @@ async function main() {
       contractAddress,
       privateStateId: PRIVATE_STATE_ID,
       circuitId: 'createEvent',
-      // Fully public demo event — all-zero privateMetadataCommit means "no private part".
+      // Fully public demo event — all-zero privateMetadataCommit/privateAttributesRoot
+      // means "no private part" / "no attributes committed".
       args: [
         DEMO_EVENT_ID,
         100n,
         0n,
         true,
         'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json',
+        new Uint8Array(32),
         new Uint8Array(32),
       ],
     });

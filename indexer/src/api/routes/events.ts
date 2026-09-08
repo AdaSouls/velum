@@ -13,7 +13,8 @@ export function eventsRouter(db: Pool): Router {
       const issuerPk = typeof req.query.issuerPk === 'string' ? req.query.issuerPk : undefined;
       const { rows } = await db.query(
         `SELECT event_id, issuer_pk, max_supply, expiration, is_active,
-                is_public_mint, metadata_uri, minted, created_block, created_tx, deactivated_block
+                is_public_mint, metadata_uri, minted, private_attributes_root,
+                created_block, created_tx, deactivated_block
          FROM events
          WHERE $1::text IS NULL OR issuer_pk = $1
          ORDER BY is_active DESC, created_block ASC`,
@@ -31,7 +32,8 @@ export function eventsRouter(db: Pool): Router {
     try {
       const { rows } = await db.query(
         `SELECT e.event_id, e.issuer_pk, e.max_supply, e.expiration, e.is_active,
-                e.is_public_mint, e.metadata_uri, e.minted, e.created_block, e.created_tx, e.deactivated_block,
+                e.is_public_mint, e.metadata_uri, e.minted, e.private_attributes_root,
+                e.created_block, e.created_tx, e.deactivated_block,
                 COUNT(t.token_id) FILTER (WHERE NOT t.is_burned) AS live_tokens
          FROM events e
          LEFT JOIN tokens t ON t.first_event_id = e.event_id
@@ -95,6 +97,11 @@ function normaliseEvent(row: Record<string, unknown>) {
     isPublicMint:   row.is_public_mint,
     metadataURI:    row.metadata_uri,
     minted:         Number(row.minted),
+    // Merkle root only — never the attribute values themselves. A verifier
+    // wanting to ask "prove your event's field X is in set S" reads this to
+    // confirm the event actually has attributes committed before issuing a
+    // disclosure request off-chain (see proveAttributeMembership).
+    privateAttributesRoot: row.private_attributes_root,
     createdBlock:   row.created_block ? Number(row.created_block) : null,
     createdTx:      row.created_tx,
     deactivatedBlock: row.deactivated_block ? Number(row.deactivated_block) : null,

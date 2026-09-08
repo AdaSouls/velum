@@ -1,11 +1,79 @@
+import { createHash } from 'node:crypto';
 import {
   type CircuitContext,
   createCircuitContext,
   emptyZswapLocalState,
   sampleContractAddress,
+  transientHash,
+  degradeToTransient,
+  upgradeFromTransient,
+  CompactTypeField,
+  CompactTypeVector,
 } from '@midnight-ntwrk/compact-runtime';
 import { Contract, type Ledger, ledger, pureCircuits } from '../managed/poap/contract/index.js';
 import { createWitnesses, type PoapPrivateState } from '../witnesses.js';
+
+// MerkleTreePath<n, Bytes<32>> compiled shape (confirmed via generated
+// contract/index.d.ts against compactc 0.31.1) — the depth generic (8 for
+// attributePath, 16 for setMembershipPath) is enforced by the circuit at
+// proof time via the array length, not encoded in this TS type, so one
+// alias covers both. Note goes_left (snake_case), not goesLeft.
+type MerklePathArg = {
+  leaf: Uint8Array;
+  path: { sibling: { field: bigint }; goes_left: boolean }[];
+};
+
+// ── Merkle path fixtures ──────────────────────────────────────────────────
+//
+// Reimplements merkleTreePathRoot's exact algorithm so tests can build a
+// REAL, valid (leaf, path) → root, rather than guessing. Confirmed via
+// direct source inspection of midnightntwrk/midnight-ledger (`ledger-8`,
+// commit a94bd39a) and LFDT-Minokawa/compact (`main`, commit 2acb58e):
+//   leaf digest = degradeToTransient(SHA256("mdn:lh" ++ leafBytes))
+//   combine(acc, sibling, goesLeft) = transientHash<Vector<2,Field>>(
+//     goesLeft ? [acc, sibling] : [sibling, acc])
+// The leaf-hash step is plain SHA-256 (Node's crypto — unambiguous). The
+// per-level combine step calls the REAL exported transientHash rather than
+// hand-rolling Poseidon: its exact parameterization lives in an external
+// crate (midnight_circuits) the source investigation couldn't reach, so
+// this is the only reliable way to reproduce it — and it's literally the
+// same function the compiled contract calls internally, not a lookalike.
+const LEAF_DOMAIN_SEP = Buffer.from('mdn:lh', 'ascii');
+const FIELD_PAIR = new CompactTypeVector<bigint>(2, CompactTypeField);
+
+function leafDigestField(leafBytes32: Uint8Array): bigint {
+  const sha = createHash('sha256')
+    .update(Buffer.concat([LEAF_DOMAIN_SEP, Buffer.from(leafBytes32)]))
+    .digest();
+  return degradeToTransient(new Uint8Array(sha));
+}
+
+// Builds a self-consistent MerkleTreePath<depth, Bytes<32>> for a single
+// leaf from caller-supplied (or default all-zero/all-left) siblings —
+// enough to produce a genuinely valid root/path pair without needing a
+// populated multi-leaf tree, since these attribute/set trees are computed
+// off-ledger by the organizer/verifier rather than tracked as an on-chain
+// MerkleTree ledger.
+export function buildMerklePath(
+  leafBytes32: Uint8Array,
+  depth: number,
+  siblings: bigint[] = new Array(depth).fill(0n),
+  goesLeft: boolean[] = new Array(depth).fill(true),
+): { leaf: Uint8Array; path: MerklePathArg['path']; rootBytes: Uint8Array } {
+  if (siblings.length !== depth || goesLeft.length !== depth) {
+    throw new Error(`siblings/goesLeft must have length ${depth}`);
+  }
+  let acc = leafDigestField(leafBytes32);
+  const path: MerklePathArg['path'] = [];
+  for (let i = 0; i < depth; i++) {
+    const sibling = siblings[i];
+    const left = goesLeft[i] ? acc : sibling;
+    const right = goesLeft[i] ? sibling : acc;
+    acc = transientHash(FIELD_PAIR, [left, right]);
+    path.push({ sibling: { field: sibling }, goes_left: goesLeft[i] });
+  }
+  return { leaf: leafBytes32, path, rootBytes: upgradeFromTransient(acc) };
+}
 
 // The POAP contract is account-model (no shielded coins), so the Zswap coin
 // public key is never used by circuit logic — a fixed dummy key is sufficient.
@@ -112,6 +180,7 @@ export class PoapSimulator {
     isPublicMint: boolean,
     metadataURI: string = 'ipfs://test-metadata',
     privateMetadataCommit: Uint8Array = new Uint8Array(32),
+    privateAttributesRoot: Uint8Array = new Uint8Array(32),
   ): Ledger {
     this.circuitContext = this.contract.impureCircuits
       .createEvent(
@@ -122,6 +191,7 @@ export class PoapSimulator {
         isPublicMint,
         metadataURI,
         privateMetadataCommit,
+        privateAttributesRoot,
       )
       .context;
     this.savePrivateState();
@@ -215,6 +285,54 @@ export class PoapSimulator {
   // the chain checks in revealPrivateMetadata.
   static computePrivateMetadataCommit(value: Uint8Array, rand: Uint8Array): Uint8Array {
     return pureCircuits.computePrivateMetadataCommit(value, rand);
+  }
+
+  // ── Selective disclosure (attribute membership) ──────────────────────────
+  //
+  // Pure helper — computeAttributeLeaf reads no ledger state and, unlike
+  // getCallerPk/getHolderPk, landed in PureCircuits per the compiled
+  // contract/index.d.ts (confirmed via `npm run compact` against
+  // compactc 0.31.1) — no CircuitContext needed.
+  static computeAttributeLeaf(fieldId: Uint8Array, value: Uint8Array, rand: Uint8Array): Uint8Array {
+    return pureCircuits.computeAttributeLeaf(fieldId, value, rand);
+  }
+
+  proveAttributeMembership(
+    eventId: Uint8Array,
+    fieldId: Uint8Array,
+    value: Uint8Array,
+    rand: Uint8Array,
+    attributePath: MerklePathArg,
+    publicSetRoot: Uint8Array,
+    setMembershipPath: MerklePathArg,
+  ): boolean {
+    const result = this.contract.impureCircuits.proveAttributeMembership(
+      this.circuitContext, eventId, fieldId, value, rand, attributePath, publicSetRoot, setMembershipPath,
+    );
+    this.circuitContext = result.context;
+    this.savePrivateState();
+    return result.result as boolean;
+  }
+
+  proveAttributeMembershipOnce(
+    eventId: Uint8Array,
+    fieldId: Uint8Array,
+    value: Uint8Array,
+    rand: Uint8Array,
+    attributePath: MerklePathArg,
+    publicSetRoot: Uint8Array,
+    setMembershipPath: MerklePathArg,
+    verifierId: Uint8Array,
+    requestId: Uint8Array,
+  ): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .proveAttributeMembershipOnce(
+        this.circuitContext, eventId, fieldId, value, rand,
+        attributePath, publicSetRoot, setMembershipPath, verifierId, requestId,
+      )
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
   }
 
   private savePrivateState(): void {

@@ -8,6 +8,7 @@ import {
   ISSUER1_SK,
   ISSUER2_SK,
   makeEventId,
+  buildMerklePath,
 } from './poap-simulator.js';
 
 setNetworkId('undeployed');
@@ -652,5 +653,230 @@ describe('POAP contract — burn', () => {
 
     sim.asUser(USER2_SK);
     expect(() => sim.burn(0n)).toThrow();
+  });
+});
+
+// ── Selective Disclosure: privateAttributesRoot ────────────────────────────────
+//
+// Coverage here is intentionally limited to what's checkable without a real
+// compactc build: that the new EventRecord field exists, defaults to
+// all-zero, round-trips through createEvent, and survives the two
+// EventRecord rebuild sites (mintTokenTo, deactivateEvent) — the exact bug
+// class this contract's existing tests already guard privateMetadataCommit
+// against (see "regression guard" below). Circuit-level tests for
+// proveAttributeMembership / proveAttributeMembershipOnce need real
+// MerkleTreePath<n, Bytes<32>> witnesses, whose generated TS shape only
+// exists after `npm run compact` regenerates managed/poap/contract — add
+// those once that's confirmed.
+
+describe('POAP contract — privateAttributesRoot', () => {
+  const NO_ATTRIBUTES = new Uint8Array(32);
+
+  it('event with no attributes uses an all-zero root by default', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    expect(sim.getLedger().events.lookup(EVENT_A).privateAttributesRoot).toEqual(NO_ATTRIBUTES);
+  });
+
+  it('createEvent stores a non-zero privateAttributesRoot', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const root = new Uint8Array(32).fill(42);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a-badge', NO_ATTRIBUTES, root);
+    expect(sim.getLedger().events.lookup(EVENT_A).privateAttributesRoot).toEqual(root);
+  });
+
+  it('regression guard: minting (mintTokenTo rebuild) must not drop privateAttributesRoot', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const root = new Uint8Array(32).fill(42);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a-badge', NO_ATTRIBUTES, root);
+    sim.asUser(USER1_SK).claim(EVENT_A, false);
+    expect(sim.getLedger().events.lookup(EVENT_A).privateAttributesRoot).toEqual(root);
+  });
+
+  it('regression guard: deactivateEvent rebuild must not drop privateAttributesRoot', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const root = new Uint8Array(32).fill(42);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a-badge', NO_ATTRIBUTES, root);
+    sim.deactivateEvent(EVENT_A);
+    expect(sim.getLedger().events.lookup(EVENT_A).privateAttributesRoot).toEqual(root);
+  });
+});
+
+// ── Selective Disclosure: proveAttributeMembership ──────────────────────────
+//
+// Real end-to-end coverage using genuine Merkle paths built via
+// buildMerklePath (poap-simulator.ts), which reimplements the confirmed
+// on-chain algorithm rather than fabricating plausible-looking test data —
+// see that helper's comment for the source references. If either side of
+// this (the contract's assertions or buildMerklePath's algorithm) is wrong,
+// these tests will fail — a mismatch on either end can't accidentally pass.
+
+describe('POAP contract — proveAttributeMembership (selective disclosure)', () => {
+  const FIELD_LOCATION = new Uint8Array(32).fill(0xaa);
+  const NO_ATTRIBUTES = new Uint8Array(32);
+
+  function setUpEventWithAttribute(sim: PoapSimulator, value: Uint8Array, rand: Uint8Array) {
+    const leaf = PoapSimulator.computeAttributeLeaf(FIELD_LOCATION, value, rand);
+    const attr = buildMerklePath(leaf, 8);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a', NO_ATTRIBUTES, attr.rootBytes);
+    return attr;
+  }
+
+  it('accepts a genuinely valid proof: committed attribute that is also in the caller-supplied public set', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7); // e.g. a hash standing in for "Argentina"
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+    const set = buildMerklePath(value, 16); // value is the sole member of this ad hoc public set
+
+    const holds = sim.proveAttributeMembership(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+    );
+    expect(holds).toBe(true);
+  });
+
+  it('rejects a wrong value/rand opening (does not match the committed attribute)', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+    const set = buildMerklePath(value, 16);
+
+    const wrongValue = new Uint8Array(32).fill(1); // e.g. "Brazil" instead of "Argentina"
+    expect(() => sim.proveAttributeMembership(
+      EVENT_A, FIELD_LOCATION, wrongValue, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+    )).toThrow();
+  });
+
+  it('rejects a tampered attribute path (recomputed root does not match privateAttributesRoot)', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+    const set = buildMerklePath(value, 16);
+
+    const tamperedPath = attr.path.map((entry, i) =>
+      i === 0 ? { ...entry, sibling: { field: entry.sibling.field + 1n } } : entry,
+    );
+    expect(() => sim.proveAttributeMembership(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: tamperedPath },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+    )).toThrow();
+  });
+
+  it('rejects when the value is not actually a member of the claimed public set', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+
+    // Set built for a DIFFERENT value — value is genuinely not a member.
+    const unrelatedValue = new Uint8Array(32).fill(3);
+    const set = buildMerklePath(unrelatedValue, 16);
+
+    expect(() => sim.proveAttributeMembership(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path }, // set's own leaf, doesn't match `value`
+    )).toThrow();
+  });
+
+  it('never writes to usedDisclosures — the stateless path leaves no ledger footprint', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+    const set = buildMerklePath(value, 16);
+
+    const before = sim.getLedger().usedDisclosures.size();
+    sim.proveAttributeMembership(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+    );
+    expect(sim.getLedger().usedDisclosures.size()).toBe(before);
+  });
+});
+
+describe('POAP contract — proveAttributeMembershipOnce (single-use disclosure)', () => {
+  const FIELD_LOCATION = new Uint8Array(32).fill(0xaa);
+  const NO_ATTRIBUTES = new Uint8Array(32);
+  const VERIFIER_ID = new Uint8Array(32).fill(0xbb);
+  const REQUEST_ID = new Uint8Array(32).fill(0xcc);
+
+  function setUp(sim: PoapSimulator) {
+    const value = new Uint8Array(32).fill(7);
+    const rand = new Uint8Array(32).fill(9);
+    const leaf = PoapSimulator.computeAttributeLeaf(FIELD_LOCATION, value, rand);
+    const attr = buildMerklePath(leaf, 8);
+    sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a', NO_ATTRIBUTES, attr.rootBytes);
+    const set = buildMerklePath(value, 16);
+    return { value, rand, attr, set };
+  }
+
+  it('records a nullifier in usedDisclosures on first redemption', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const { value, rand, attr, set } = setUp(sim);
+
+    const state = sim.proveAttributeMembershipOnce(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+      VERIFIER_ID, REQUEST_ID,
+    );
+    expect(state.usedDisclosures.size()).toBe(1n);
+  });
+
+  it('rejects redeeming the same (verifier, request) twice', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const { value, rand, attr, set } = setUp(sim);
+
+    sim.proveAttributeMembershipOnce(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+      VERIFIER_ID, REQUEST_ID,
+    );
+    expect(() => sim.proveAttributeMembershipOnce(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+      VERIFIER_ID, REQUEST_ID,
+    )).toThrow();
+  });
+
+  it('a different requestId for the same verifier is a different nullifier — not blocked', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const { value, rand, attr, set } = setUp(sim);
+
+    sim.proveAttributeMembershipOnce(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+      VERIFIER_ID, REQUEST_ID,
+    );
+    const otherRequest = new Uint8Array(32).fill(0xdd);
+    const state = sim.proveAttributeMembershipOnce(
+      EVENT_A, FIELD_LOCATION, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      set.rootBytes,
+      { leaf: set.leaf, path: set.path },
+      VERIFIER_ID, otherRequest,
+    );
+    expect(state.usedDisclosures.size()).toBe(2n);
   });
 });
