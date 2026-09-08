@@ -33,6 +33,20 @@ export struct IssuerRecord {
   isActive: Boolean,
 }
 
+// A verifier-published question: "does this event's <fieldId> attribute
+// belong to the set rooted at <setRoot>?" Published on-chain by the
+// verifier BEFORE a holder can prove against it — see
+// publishDisclosureRequest / proveAttributeMembership. Pinning this in
+// ledger state (instead of letting the prover supply setRoot themselves)
+// is what makes the resulting proof mean anything: a caller-supplied root
+// is trivially satisfiable for any value.
+export struct DisclosureRequest {
+  verifier: Bytes<32>,
+  eventId: Bytes<32>,
+  fieldId: Bytes<32>,
+  setRoot: Bytes<32>,
+}
+
 // ── Public Ledger ─────────────────────────────────────────────────────────────
 
 export ledger totalSupply: Counter;
@@ -86,12 +100,18 @@ export ledger burnedTokens: Map<Uint<64>, Boolean>;
 
 // Nullifiers spent by proveAttributeMembershipOnce — guards single-use
 // selective-disclosure proofs (e.g. "redeem a perk once for proving X")
-// against replay, without revealing which wallet, which event, or which
-// attribute the disclosure was about. Most disclosures should use the
+// against replay, without revealing which wallet the disclosure was
+// about (see disclosure_nullifier). Most disclosures should use the
 // stateless proveAttributeMembership instead and never touch this map —
-// only use the Once variant when a disclosure must provably happen at most
-// once. See disclosure_nullifier below.
+// only use the Once variant when a disclosure must provably happen at
+// most once.
 export ledger usedDisclosures: Map<Bytes<32>, Boolean>;
+
+// requestId → the pinned question a verifier published. Reading this via
+// lookup() is what makes eventId/fieldId/setRoot actually public and
+// checkable in proveAttributeMembership, instead of trusting whatever the
+// prover claims — see DisclosureRequest and publishDisclosureRequest.
+export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 
 // Contract-level pause flag
 export ledger isPaused: Boolean;
@@ -442,35 +462,48 @@ export circuit revealPrivateTokenMetadata(tokenId: Uint<64>, value: Bytes<32>, r
 // content to eventually become public knowledge.
 //
 // The circuits below are "Channel B": prove a PREDICATE about a hidden
-// attribute (e.g. "this event's country is in the EU") to whoever you send
-// this specific proof to, without ever disclosing the attribute's actual
-// value on-chain, and without touching eventRevealedMetadata at all. The
-// value/rand opening stays a witness inside the ZK argument — it never
-// appears in the public transaction transcript.
+// attribute (e.g. "this event's country is in the EU") to whoever asked —
+// without ever disclosing the attribute's actual value on-chain, and
+// without touching eventRevealedMetadata at all. value/rand stay witnesses
+// inside the ZK argument — they never appear in the public transcript.
+//
+// SECURITY-CRITICAL DESIGN NOTE (fixes a real vulnerability from an earlier
+// version of this file, confirmed via a security audit that ran the exploit
+// against the compiled contract): the "set" being checked against MUST be
+// pinned in ledger state via publishDisclosureRequest before anyone proves
+// against it. An earlier version let the prover pass `publicSetRoot`
+// directly as a circuit argument — but a circuit argument is caller-chosen
+// private input, so a prover could satisfy the membership check for ANY
+// value by inventing a one-leaf "set" containing exactly that value and
+// supplying its own root. The check was self-consistent but vacuous: it
+// constrained nothing. Reading the expected root via
+// disclosureRequests.lookup() instead — a ledger operation — is what makes
+// it something the prover cannot choose. The same reasoning applies to
+// binding the disclosure_nullifier to a real, on-chain requestId instead of
+// a freely-chosen one (see proveAttributeMembershipOnce).
 //
 // Depths below are fixed at compile time (Compact has no dynamic-length
 // arrays) — this is the same fixed-max-depth tradeoff every production ZK
 // Merkle scheme makes, not a limitation specific to this design:
 //   ATTR_DEPTH = 8  → up to 256 attribute leaves committed per event
-//   SET_DEPTH  = 16 → up to 65536 members in a verifier-supplied public set
-// publicSetRoot is NOT contract state — it is supplied by the caller,
-// because the "set" being checked against (e.g. "EU country codes") is
-// whatever the party asking the question defines for their own request; the
-// contract does not need to know or store it.
+//   SET_DEPTH  = 16 → up to 65536 members in a verifier-published set
 //
 // Confirmed against compactc 0.31.1: merkleTreePathRoot<#n, T>(path) returns
 // MerkleTreeDigest ({ field: Field }), not Bytes<32> — use
 // upgradeFromTransient(digest.field) to get a Bytes<32> back for comparison
 // against ledger-stored roots.
 
-// Internal leaf hash — binds fieldId to the same (value, rand) commit
-// scheme already used for privateMetadataCommit, so a single opening can't
-// be replayed under a different fieldId. value/rand are NEVER disclosed
-// here: this circuit is only ever called from inside another circuit that
-// keeps them as witnesses.
-circuit attribute_leaf_hash(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<2, Bytes<32>>>(
-           [fieldId, persistentCommit<Bytes<32>>(value, rand)]
+// Internal leaf hash — binds fieldId AND eventId to the same (value, rand)
+// commit scheme already used for privateMetadataCommit, so a single opening
+// can't be replayed under a different fieldId, and a root published for one
+// event can't be reused to validate proofs about a different event (an
+// earlier version omitted eventId here — the one hash in this contract
+// without a domain tag, until now). value/rand are NEVER disclosed here:
+// this circuit is only ever called from inside another circuit that keeps
+// them as witnesses.
+circuit attribute_leaf_hash(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+           [pad(32, "adasouls:attr-leaf:v1:"), eventId, fieldId, persistentCommit<Bytes<32>>(value, rand)]
            );
 }
 
@@ -480,98 +513,123 @@ circuit attribute_leaf_hash(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32
 // version discloses its own inputs — the organizer already knows their own
 // field values; disclose() here only satisfies taint-tracking so the
 // result can be used outside a circuit, it does not leak anything new.
-export circuit computeAttributeLeaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
-  return attribute_leaf_hash(disclose(fieldId), disclose(value), disclose(rand));
+export circuit computeAttributeLeaf(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return attribute_leaf_hash(disclose(eventId), disclose(fieldId), disclose(value), disclose(rand));
 }
 
-// Proves that a hidden attribute of `eventId` (identified by `fieldId`,
-// opened via `value`/`rand`) is a member of `publicSetRoot` — a Merkle root
-// the CALLER supplies (typically handed to them by whoever asked the
-// question, e.g. "here is the root of the set of EU country-code hashes").
-// Returns true/false; never inserts anything into ledger state. Per the
-// Compact circuit classification already used elsewhere in this contract
+// Derives a requestId from the verifier's own identity + a label they
+// choose, the same way createEvent's caller-chosen eventId would ideally
+// be scoped (see the eventId-squatting finding elsewhere) — this prevents
+// a third party from squatting a request id a verifier is about to
+// publish, or colliding with one another verifier already used, without
+// requiring any coordination beyond "pick your own label".
+circuit disclosure_request_key(verifier: Bytes<32>, label: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:disclosure-req:v1:"), verifier, label]
+           );
+}
+
+// Publishes a disclosure request: "does event `eventId`'s `fieldId`
+// attribute belong to the set rooted at `setRoot`?" Callable by anyone who
+// wants to ask (not just admin/organizer — e.g. a third-party verifier
+// checking eligibility for something of their own). Returns the derived
+// requestId, which the verifier hands to whoever they want an answer from
+// (QR code, link, etc.) alongside setRoot's opening (the actual set
+// members) so the holder can build a real membership path.
+export circuit publishDisclosureRequest(
+                 label: Bytes<32>,
+                 eventId: Bytes<32>,
+                 fieldId: Bytes<32>,
+                 setRoot: Bytes<32>
+                 ): Bytes<32> {
+  assert(!isPaused, "Contract is paused");
+  const lbl = disclose(label);
+  const evId = disclose(eventId);
+  const fId = disclose(fieldId);
+  const sRoot = disclose(setRoot);
+  assert(events.member(evId), "Event does not exist");
+  const verifier = caller_pk();
+  const rid = disclose(disclosure_request_key(verifier, lbl));
+  assert(!disclosureRequests.member(rid), "Request already published");
+  const req = DisclosureRequest { verifier: verifier, eventId: evId, fieldId: fId, setRoot: sRoot };
+  disclosureRequests.insert(rid, req);
+  return rid;
+}
+
+// Proves that a hidden attribute matches a previously-published
+// DisclosureRequest — i.e. that the event/field/set the request pinned
+// really does hold for a `value` the prover knows an opening for. Returns
+// true; never inserts anything into ledger state. Per the Compact circuit
+// classification already used elsewhere in this contract
 // (getCallerPk/getHolderPk are witness-only and need no proof; anything
 // that reads ledger state like `events` becomes a ProvableCircuit), this
 // circuit DOES require proof generation and a submitted transaction, same
 // as revealPrivateMetadata — it does not mutate state, but it still needs a
 // ZK argument because a third party must be able to trust the result
-// without trusting the caller. See the Selective Disclosure design note
-// above the module for the open question of whether the resulting proof
-// can also be verified fully offline (unconfirmed pending a toolchain
-// spike) — this circuit works either way; only how the proof gets to the
-// verifier would change.
+// without trusting the caller.
 export circuit proveAttributeMembership(
-                 eventId: Bytes<32>,
-                 fieldId: Bytes<32>,
+                 requestId: Bytes<32>,
                  value: Bytes<32>,
                  rand: Bytes<32>,
                  attributePath: MerkleTreePath<8, Bytes<32>>,
-                 publicSetRoot: Bytes<32>,
                  setMembershipPath: MerkleTreePath<16, Bytes<32>>
                  ): Boolean {
-  const evId = disclose(eventId);
-  const fId = disclose(fieldId);
-  const setRoot = disclose(publicSetRoot);
-  assert(events.member(evId), "Event does not exist");
-  const ev = events.lookup(evId);
+  const rid = disclose(requestId);
+  assert(disclosureRequests.member(rid), "Unknown disclosure request");
+  const req = disclosureRequests.lookup(rid);
+  assert(events.member(req.eventId), "Event does not exist");
+  const ev = events.lookup(req.eventId);
 
   // 1. The hidden (value, rand) opening really is one of this event's
   //    committed attribute leaves — value/rand never leave the circuit.
   // merkleTreePathRoot returns MerkleTreeDigest ({ field: Field }), not
   // Bytes<32> — upgradeFromTransient converts its .field back to Bytes<32>
   // so it can be compared against the Bytes<32> root stored in EventRecord.
-  const leaf = attribute_leaf_hash(fId, value, rand);
+  const leaf = attribute_leaf_hash(req.eventId, req.fieldId, value, rand);
   assert(attributePath.leaf == leaf, "Path does not match the recomputed leaf");
   const attrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field);
   assert(attrRoot == ev.privateAttributesRoot, "Attribute not committed for this event");
 
-  // 2. The SAME hidden value is also a member of the caller-supplied
-  //    public set (e.g. "is a member of {EU country codes}") — again
-  //    without disclosing which member it is.
+  // 2. The SAME hidden value is also a member of the set PINNED by the
+  //    published request (req.setRoot — ledger state, not a circuit
+  //    argument) — again without disclosing which member it is.
   assert(setMembershipPath.leaf == value, "Set path does not match the hidden value");
   const computedSetRoot = upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field);
-  assert(computedSetRoot == setRoot, "Value is not a member of the given public set");
+  assert(computedSetRoot == req.setRoot, "Value is not a member of the requested set");
 
   return true;
 }
 
-// Per-(verifier, request) nullifier — same per-context pseudonym trick as
-// holder_pk, so redeeming a disclosure to one verifier can't be linked to
-// redeeming a different disclosure to a different verifier, or to this
-// wallet's other on-chain activity.
-circuit disclosure_nullifier(verifierId: Bytes<32>, requestId: Bytes<32>): Bytes<32> {
+// Nullifier keyed on the (real, on-chain, unforgeable) requestId alone —
+// deterministic per (wallet, request), so this wallet always produces the
+// same nullifier for the same request (blocking replay) but an
+// unrelated/different request produces a different, unlinkable nullifier
+// (same per-context pseudonym trick as holder_pk).
+circuit disclosure_nullifier(requestId: Bytes<32>): Bytes<32> {
   return disclose(persistentHash<Vector<3, Bytes<32>>>(
-           [pad(32, "adasouls:disclosure:v1:"), local_sk(),
-            persistentHash<Vector<2, Bytes<32>>>([verifierId, requestId])]
+           [pad(32, "adasouls:disclosure:v2:"), local_sk(), requestId]
            ));
 }
 
 // Single-use variant of proveAttributeMembership: same predicate check,
-// plus a nullifier recorded in usedDisclosures so this exact
-// (wallet, verifier, request) combination cannot be redeemed twice. Only
-// use this when a disclosure must provably happen at most once (e.g.
-// redeeming a perk) — it costs a state write and reveals (only to someone
-// who already knows verifierId/requestId) that SOME disclosure for that
-// request was redeemed. Most "just answer the question" flows should call
-// proveAttributeMembership directly instead and skip this entirely.
+// plus a nullifier recorded in usedDisclosures so this (wallet, request)
+// combination cannot be redeemed twice. Only use this when a disclosure
+// must provably happen at most once (e.g. redeeming a perk) — it costs a
+// state write and reveals (only to someone who already knows requestId,
+// i.e. the verifier who published it) that SOME wallet redeemed it. Most
+// "just answer the question" flows should call proveAttributeMembership
+// directly instead and skip this entirely.
 export circuit proveAttributeMembershipOnce(
-                 eventId: Bytes<32>,
-                 fieldId: Bytes<32>,
+                 requestId: Bytes<32>,
                  value: Bytes<32>,
                  rand: Bytes<32>,
                  attributePath: MerkleTreePath<8, Bytes<32>>,
-                 publicSetRoot: Bytes<32>,
-                 setMembershipPath: MerkleTreePath<16, Bytes<32>>,
-                 verifierId: Bytes<32>,
-                 requestId: Bytes<32>
+                 setMembershipPath: MerkleTreePath<16, Bytes<32>>
                  ): [] {
   assert(!isPaused, "Contract is paused");
-  const holds = proveAttributeMembership(
-                  eventId, fieldId, value, rand,
-                  attributePath, publicSetRoot, setMembershipPath
-                  );
+  const holds = proveAttributeMembership(requestId, value, rand, attributePath, setMembershipPath);
   assert(holds, "Predicate does not hold");
-  const n = disclosure_nullifier(verifierId, requestId);
+  const n = disclosure_nullifier(requestId);
   assert(!usedDisclosures.member(n), "Disclosure already redeemed for this request");
   usedDisclosures.insert(n, true);
 }

@@ -293,21 +293,37 @@ export class PoapSimulator {
   // getCallerPk/getHolderPk, landed in PureCircuits per the compiled
   // contract/index.d.ts (confirmed via `npm run compact` against
   // compactc 0.31.1) — no CircuitContext needed.
-  static computeAttributeLeaf(fieldId: Uint8Array, value: Uint8Array, rand: Uint8Array): Uint8Array {
-    return pureCircuits.computeAttributeLeaf(fieldId, value, rand);
+  static computeAttributeLeaf(eventId: Uint8Array, fieldId: Uint8Array, value: Uint8Array, rand: Uint8Array): Uint8Array {
+    return pureCircuits.computeAttributeLeaf(eventId, fieldId, value, rand);
+  }
+
+  // Verifier publishes the question ("does this event's field belong to
+  // this set?") on-chain BEFORE a holder can prove against it — this is
+  // what pins setRoot/eventId/fieldId so proveAttributeMembership can't be
+  // satisfied by a self-invented set. Returns the derived requestId.
+  publishDisclosureRequest(
+    label: Uint8Array,
+    eventId: Uint8Array,
+    fieldId: Uint8Array,
+    setRoot: Uint8Array,
+  ): Uint8Array {
+    const result = this.contract.impureCircuits.publishDisclosureRequest(
+      this.circuitContext, label, eventId, fieldId, setRoot,
+    );
+    this.circuitContext = result.context;
+    this.savePrivateState();
+    return result.result as Uint8Array;
   }
 
   proveAttributeMembership(
-    eventId: Uint8Array,
-    fieldId: Uint8Array,
+    requestId: Uint8Array,
     value: Uint8Array,
     rand: Uint8Array,
     attributePath: MerklePathArg,
-    publicSetRoot: Uint8Array,
     setMembershipPath: MerklePathArg,
   ): boolean {
     const result = this.contract.impureCircuits.proveAttributeMembership(
-      this.circuitContext, eventId, fieldId, value, rand, attributePath, publicSetRoot, setMembershipPath,
+      this.circuitContext, requestId, value, rand, attributePath, setMembershipPath,
     );
     this.circuitContext = result.context;
     this.savePrivateState();
@@ -315,20 +331,15 @@ export class PoapSimulator {
   }
 
   proveAttributeMembershipOnce(
-    eventId: Uint8Array,
-    fieldId: Uint8Array,
+    requestId: Uint8Array,
     value: Uint8Array,
     rand: Uint8Array,
     attributePath: MerklePathArg,
-    publicSetRoot: Uint8Array,
     setMembershipPath: MerklePathArg,
-    verifierId: Uint8Array,
-    requestId: Uint8Array,
   ): Ledger {
     this.circuitContext = this.contract.impureCircuits
       .proveAttributeMembershipOnce(
-        this.circuitContext, eventId, fieldId, value, rand,
-        attributePath, publicSetRoot, setMembershipPath, verifierId, requestId,
+        this.circuitContext, requestId, value, rand, attributePath, setMembershipPath,
       )
       .context;
     this.savePrivateState();

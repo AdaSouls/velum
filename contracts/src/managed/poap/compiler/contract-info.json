@@ -354,6 +354,13 @@
       "proof": false,
       "arguments": [
         {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
           "name": "fieldId",
           "type": {
             "type-name": "Bytes",
@@ -381,10 +388,17 @@
       }
     },
     {
-      "name": "proveAttributeMembership",
+      "name": "publishDisclosureRequest",
       "pure": false,
       "proof": true,
       "arguments": [
+        {
+          "name": "label",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
         {
           "name": "eventId",
           "type": {
@@ -394,6 +408,31 @@
         },
         {
           "name": "fieldId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "setRoot",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "proveAttributeMembership",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "requestId",
           "type": {
             "type-name": "Bytes",
             "length": 32
@@ -461,13 +500,6 @@
                 }
               }
             ]
-          }
-        },
-        {
-          "name": "publicSetRoot",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
           }
         },
         {
@@ -531,14 +563,7 @@
       "proof": true,
       "arguments": [
         {
-          "name": "eventId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
-          "name": "fieldId",
+          "name": "requestId",
           "type": {
             "type-name": "Bytes",
             "length": 32
@@ -609,13 +634,6 @@
           }
         },
         {
-          "name": "publicSetRoot",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
           "name": "setMembershipPath",
           "type": {
             "type-name": "Struct",
@@ -663,20 +681,6 @@
                 }
               }
             ]
-          }
-        },
-        {
-          "name": "verifierId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
-          "name": "requestId",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
           }
         }
       ],
@@ -740,13 +744,19 @@
   "ledger": [
     {
       "name": "totalSupply",
-      "index": 0,
+      "index": [
+        0,
+        0
+      ],
       "exported": true,
       "storage": "Counter"
     },
     {
       "name": "tokenOwner",
-      "index": 1,
+      "index": [
+        1,
+        0
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -760,7 +770,10 @@
     },
     {
       "name": "tokenEvent",
-      "index": 2,
+      "index": [
+        1,
+        1
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -774,7 +787,10 @@
     },
     {
       "name": "tokenIssuer",
-      "index": 3,
+      "index": [
+        1,
+        2
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -788,7 +804,10 @@
     },
     {
       "name": "tokenMetadataURI",
-      "index": 4,
+      "index": [
+        1,
+        3
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -802,7 +821,10 @@
     },
     {
       "name": "tokenPrivateMetadataCommit",
-      "index": 5,
+      "index": [
+        1,
+        4
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -816,7 +838,10 @@
     },
     {
       "name": "tokenRevealedMetadata",
-      "index": 6,
+      "index": [
+        1,
+        5
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -830,7 +855,10 @@
     },
     {
       "name": "eventHolderToken",
-      "index": 7,
+      "index": [
+        1,
+        6
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -844,7 +872,10 @@
     },
     {
       "name": "events",
-      "index": 8,
+      "index": [
+        1,
+        7
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -921,7 +952,10 @@
     },
     {
       "name": "eventRevealedMetadata",
-      "index": 9,
+      "index": [
+        1,
+        8
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -935,7 +969,10 @@
     },
     {
       "name": "issuers",
-      "index": 10,
+      "index": [
+        1,
+        9
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -964,7 +1001,10 @@
     },
     {
       "name": "burnedTokens",
-      "index": 11,
+      "index": [
+        1,
+        10
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -977,7 +1017,10 @@
     },
     {
       "name": "usedDisclosures",
-      "index": 12,
+      "index": [
+        1,
+        11
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -989,8 +1032,58 @@
       }
     },
     {
+      "name": "disclosureRequests",
+      "index": [
+        1,
+        12
+      ],
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Struct",
+        "name": "DisclosureRequest",
+        "elements": [
+          {
+            "name": "verifier",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "eventId",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "fieldId",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "setRoot",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "isPaused",
-      "index": 13,
+      "index": [
+        1,
+        13
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -999,7 +1092,10 @@
     },
     {
       "name": "adminPk",
-      "index": 14,
+      "index": [
+        1,
+        14
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {

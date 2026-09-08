@@ -702,7 +702,7 @@ describe('POAP contract — privateAttributesRoot', () => {
   });
 });
 
-// ── Selective Disclosure: proveAttributeMembership ──────────────────────────
+// ── Selective Disclosure: publishDisclosureRequest + proveAttributeMembership ─
 //
 // Real end-to-end coverage using genuine Merkle paths built via
 // buildMerklePath (poap-simulator.ts), which reimplements the confirmed
@@ -710,32 +710,114 @@ describe('POAP contract — privateAttributesRoot', () => {
 // see that helper's comment for the source references. If either side of
 // this (the contract's assertions or buildMerklePath's algorithm) is wrong,
 // these tests will fail — a mismatch on either end can't accidentally pass.
+//
+// SECURITY REGRESSION CONTEXT: an earlier version of this contract let the
+// prover supply the expected set root directly as a circuit argument,
+// which a security audit confirmed was exploitable — a prover could invent
+// a one-member "set" containing exactly their own value and pass it off as
+// a real answer to any question. The fix pins the question
+// (event/field/set) on-chain via publishDisclosureRequest BEFORE anyone
+// can prove against it. The tests marked "regression:" below specifically
+// re-run the confirmed exploits and assert they are now rejected — do not
+// weaken or remove these without re-reading the audit finding.
+
+describe('POAP contract — publishDisclosureRequest', () => {
+  const FIELD_LOCATION = new Uint8Array(32).fill(0xaa);
+  const LABEL_1 = new Uint8Array(32).fill(0x01);
+
+  it('publishing a request for a nonexistent event throws', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const setRoot = new Uint8Array(32).fill(0xff);
+    expect(() => sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, setRoot)).toThrow();
+  });
+
+  it('the same verifier publishing the same label twice throws (no accidental overwrite)', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    const setRoot = new Uint8Array(32).fill(0xff);
+    sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, setRoot);
+    expect(() => sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, setRoot)).toThrow();
+  });
+
+  it('two different verifiers using the SAME label get different, independent requestIds — no squatting', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    sim.createEvent(EVENT_A, 100n, 0n, true);
+    const setRoot = new Uint8Array(32).fill(0xff);
+
+    const rid1 = sim.asUser(USER1_SK).publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, setRoot);
+    const rid2 = sim.asUser(USER2_SK).publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, setRoot);
+    expect(rid1).not.toEqual(rid2);
+    // Both independently published and usable — USER2 publishing under the
+    // same label did not overwrite or block USER1's request.
+    expect(sim.getLedger().disclosureRequests.member(rid1)).toBe(true);
+    expect(sim.getLedger().disclosureRequests.member(rid2)).toBe(true);
+  });
+});
 
 describe('POAP contract — proveAttributeMembership (selective disclosure)', () => {
   const FIELD_LOCATION = new Uint8Array(32).fill(0xaa);
   const NO_ATTRIBUTES = new Uint8Array(32);
+  const LABEL_1 = new Uint8Array(32).fill(0x01);
 
   function setUpEventWithAttribute(sim: PoapSimulator, value: Uint8Array, rand: Uint8Array) {
-    const leaf = PoapSimulator.computeAttributeLeaf(FIELD_LOCATION, value, rand);
+    const leaf = PoapSimulator.computeAttributeLeaf(EVENT_A, FIELD_LOCATION, value, rand);
     const attr = buildMerklePath(leaf, 8);
     sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a', NO_ATTRIBUTES, attr.rootBytes);
     return attr;
   }
 
-  it('accepts a genuinely valid proof: committed attribute that is also in the caller-supplied public set', () => {
+  it('accepts a genuinely valid proof: committed attribute that is a member of the PUBLISHED (pinned) set', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const value = new Uint8Array(32).fill(7); // e.g. a hash standing in for "Argentina"
     const rand = new Uint8Array(32).fill(9);
     const attr = setUpEventWithAttribute(sim, value, rand);
-    const set = buildMerklePath(value, 16); // value is the sole member of this ad hoc public set
+    const set = buildMerklePath(value, 16); // value is the sole member of this ad hoc set
+
+    // The verifier — not the prover — publishes the question first.
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     const holds = sim.proveAttributeMembership(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
     );
     expect(holds).toBe(true);
+  });
+
+  it('regression (C-1 fix): an unpublished/self-invented request is rejected — the prover cannot pin their own question', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(0xee); // a value in NO legitimate set
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+    const forgedSet = buildMerklePath(value, 16); // attacker's own one-member "set"
+
+    // The exact exploit the audit confirmed: attacker invents a requestId
+    // that was never published via publishDisclosureRequest.
+    const forgedRequestId = new Uint8Array(32).fill(0x99);
+    expect(() => sim.proveAttributeMembership(
+      forgedRequestId, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      { leaf: forgedSet.leaf, path: forgedSet.path },
+    )).toThrow('Unknown disclosure request');
+  });
+
+  it('regression: a real requestId whose PUBLISHED setRoot does not match the prover-supplied set path still fails', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const value = new Uint8Array(32).fill(0xee);
+    const rand = new Uint8Array(32).fill(9);
+    const attr = setUpEventWithAttribute(sim, value, rand);
+
+    // Verifier publishes a request pinned to a REAL set that does NOT contain `value`.
+    const legitimateSet = buildMerklePath(new Uint8Array(32).fill(3), 16);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, legitimateSet.rootBytes);
+
+    // Prover tries to substitute their own forged set path for the pinned one.
+    const forgedSet = buildMerklePath(value, 16);
+    expect(() => sim.proveAttributeMembership(
+      requestId, value, rand,
+      { leaf: attr.leaf, path: attr.path },
+      { leaf: forgedSet.leaf, path: forgedSet.path }, // doesn't match req.setRoot
+    )).toThrow('Value is not a member of the requested set');
   });
 
   it('rejects a wrong value/rand opening (does not match the committed attribute)', () => {
@@ -744,12 +826,12 @@ describe('POAP contract — proveAttributeMembership (selective disclosure)', ()
     const rand = new Uint8Array(32).fill(9);
     const attr = setUpEventWithAttribute(sim, value, rand);
     const set = buildMerklePath(value, 16);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     const wrongValue = new Uint8Array(32).fill(1); // e.g. "Brazil" instead of "Argentina"
     expect(() => sim.proveAttributeMembership(
-      EVENT_A, FIELD_LOCATION, wrongValue, rand,
+      requestId, wrongValue, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
     )).toThrow();
   });
@@ -760,32 +842,32 @@ describe('POAP contract — proveAttributeMembership (selective disclosure)', ()
     const rand = new Uint8Array(32).fill(9);
     const attr = setUpEventWithAttribute(sim, value, rand);
     const set = buildMerklePath(value, 16);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     const tamperedPath = attr.path.map((entry, i) =>
       i === 0 ? { ...entry, sibling: { field: entry.sibling.field + 1n } } : entry,
     );
     expect(() => sim.proveAttributeMembership(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: tamperedPath },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
     )).toThrow();
   });
 
-  it('rejects when the value is not actually a member of the claimed public set', () => {
+  it('rejects when the value is not actually a member of the published set', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const value = new Uint8Array(32).fill(7);
     const rand = new Uint8Array(32).fill(9);
     const attr = setUpEventWithAttribute(sim, value, rand);
 
-    // Set built for a DIFFERENT value — value is genuinely not a member.
+    // Published set built for a DIFFERENT value — value is genuinely not a member.
     const unrelatedValue = new Uint8Array(32).fill(3);
     const set = buildMerklePath(unrelatedValue, 16);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     expect(() => sim.proveAttributeMembership(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path }, // set's own leaf, doesn't match `value`
     )).toThrow();
   });
@@ -796,12 +878,12 @@ describe('POAP contract — proveAttributeMembership (selective disclosure)', ()
     const rand = new Uint8Array(32).fill(9);
     const attr = setUpEventWithAttribute(sim, value, rand);
     const set = buildMerklePath(value, 16);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     const before = sim.getLedger().usedDisclosures.size();
     sim.proveAttributeMembership(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
     );
     expect(sim.getLedger().usedDisclosures.size()).toBe(before);
@@ -811,13 +893,13 @@ describe('POAP contract — proveAttributeMembership (selective disclosure)', ()
 describe('POAP contract — proveAttributeMembershipOnce (single-use disclosure)', () => {
   const FIELD_LOCATION = new Uint8Array(32).fill(0xaa);
   const NO_ATTRIBUTES = new Uint8Array(32);
-  const VERIFIER_ID = new Uint8Array(32).fill(0xbb);
-  const REQUEST_ID = new Uint8Array(32).fill(0xcc);
+  const LABEL_1 = new Uint8Array(32).fill(0x01);
+  const LABEL_2 = new Uint8Array(32).fill(0x02);
 
   function setUp(sim: PoapSimulator) {
     const value = new Uint8Array(32).fill(7);
     const rand = new Uint8Array(32).fill(9);
-    const leaf = PoapSimulator.computeAttributeLeaf(FIELD_LOCATION, value, rand);
+    const leaf = PoapSimulator.computeAttributeLeaf(EVENT_A, FIELD_LOCATION, value, rand);
     const attr = buildMerklePath(leaf, 8);
     sim.createEvent(EVENT_A, 100n, 0n, true, 'ipfs://event-a', NO_ATTRIBUTES, attr.rootBytes);
     const set = buildMerklePath(value, 16);
@@ -827,55 +909,65 @@ describe('POAP contract — proveAttributeMembershipOnce (single-use disclosure)
   it('records a nullifier in usedDisclosures on first redemption', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const { value, rand, attr, set } = setUp(sim);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     const state = sim.proveAttributeMembershipOnce(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
-      VERIFIER_ID, REQUEST_ID,
     );
     expect(state.usedDisclosures.size()).toBe(1n);
   });
 
-  it('rejects redeeming the same (verifier, request) twice', () => {
+  it('rejects redeeming the same published request twice from the same wallet', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const { value, rand, attr, set } = setUp(sim);
+    const requestId = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     sim.proveAttributeMembershipOnce(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
-      VERIFIER_ID, REQUEST_ID,
     );
     expect(() => sim.proveAttributeMembershipOnce(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
-      VERIFIER_ID, REQUEST_ID,
-    )).toThrow();
+    )).toThrow('Disclosure already redeemed for this request');
   });
 
-  it('a different requestId for the same verifier is a different nullifier — not blocked', () => {
+  it('regression (H-1 fix): an unpublished/self-invented requestId is rejected — cannot manufacture fresh redemptions', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const { value, rand, attr, set } = setUp(sim);
+    // Real exploit was: keep the predicate honest but vary requestId freely
+    // to redeem indefinitely. Now requestId must reference a real,
+    // previously-published request.
+    for (let i = 0; i < 5; i++) {
+      const forgedRequestId = new Uint8Array(32).fill(i + 1);
+      expect(() => sim.proveAttributeMembershipOnce(
+        forgedRequestId, value, rand,
+        { leaf: attr.leaf, path: attr.path },
+        { leaf: set.leaf, path: set.path },
+      )).toThrow('Unknown disclosure request');
+    }
+    expect(sim.getLedger().usedDisclosures.size()).toBe(0n);
+  });
+
+  it('a genuinely different PUBLISHED request is a different nullifier — legitimately not blocked', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const { value, rand, attr, set } = setUp(sim);
+    const requestId1 = sim.publishDisclosureRequest(LABEL_1, EVENT_A, FIELD_LOCATION, set.rootBytes);
+    const requestId2 = sim.publishDisclosureRequest(LABEL_2, EVENT_A, FIELD_LOCATION, set.rootBytes);
 
     sim.proveAttributeMembershipOnce(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId1, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
-      VERIFIER_ID, REQUEST_ID,
     );
-    const otherRequest = new Uint8Array(32).fill(0xdd);
     const state = sim.proveAttributeMembershipOnce(
-      EVENT_A, FIELD_LOCATION, value, rand,
+      requestId2, value, rand,
       { leaf: attr.leaf, path: attr.path },
-      set.rootBytes,
       { leaf: set.leaf, path: set.path },
-      VERIFIER_ID, otherRequest,
     );
     expect(state.usedDisclosures.size()).toBe(2n);
   });

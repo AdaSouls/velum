@@ -13,6 +13,12 @@ export type EventRecord = { maxSupply: bigint;
 
 export type IssuerRecord = { organizerPk: Uint8Array; isActive: boolean };
 
+export type DisclosureRequest = { verifier: Uint8Array;
+                                  eventId: Uint8Array;
+                                  fieldId: Uint8Array;
+                                  setRoot: Uint8Array
+                                };
+
 export type Witnesses<PS> = {
   local_sk(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
   store_token(context: __compactRuntime.WitnessContext<Ledger, PS>,
@@ -59,9 +65,13 @@ export type ImpureCircuits<PS> = {
                              tokenId_0: bigint,
                              value_0: Uint8Array,
                              rand_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
-  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+  publishDisclosureRequest(context: __compactRuntime.CircuitContext<PS>,
+                           label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
+                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+                           requestId_0: Uint8Array,
                            value_0: Uint8Array,
                            rand_0: Uint8Array,
                            attributePath_0: { leaf: Uint8Array,
@@ -69,7 +79,6 @@ export type ImpureCircuits<PS> = {
                                                       goes_left: boolean
                                                     }[]
                                             },
-                           publicSetRoot_0: Uint8Array,
                            setMembershipPath_0: { leaf: Uint8Array,
                                                   path: { sibling: { field: bigint
                                                                    },
@@ -77,8 +86,7 @@ export type ImpureCircuits<PS> = {
                                                         }[]
                                                 }): __compactRuntime.CircuitResults<PS, boolean>;
   proveAttributeMembershipOnce(context: __compactRuntime.CircuitContext<PS>,
-                               eventId_0: Uint8Array,
-                               fieldId_0: Uint8Array,
+                               requestId_0: Uint8Array,
                                value_0: Uint8Array,
                                rand_0: Uint8Array,
                                attributePath_0: { leaf: Uint8Array,
@@ -87,15 +95,12 @@ export type ImpureCircuits<PS> = {
                                                           goes_left: boolean
                                                         }[]
                                                 },
-                               publicSetRoot_0: Uint8Array,
                                setMembershipPath_0: { leaf: Uint8Array,
                                                       path: { sibling: { field: bigint
                                                                        },
                                                               goes_left: boolean
                                                             }[]
-                                                    },
-                               verifierId_0: Uint8Array,
-                               requestId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+                                                    }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type ProvableCircuits<PS> = {
@@ -132,9 +137,13 @@ export type ProvableCircuits<PS> = {
                              tokenId_0: bigint,
                              value_0: Uint8Array,
                              rand_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
-  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+  publishDisclosureRequest(context: __compactRuntime.CircuitContext<PS>,
+                           label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
+                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+                           requestId_0: Uint8Array,
                            value_0: Uint8Array,
                            rand_0: Uint8Array,
                            attributePath_0: { leaf: Uint8Array,
@@ -142,7 +151,6 @@ export type ProvableCircuits<PS> = {
                                                       goes_left: boolean
                                                     }[]
                                             },
-                           publicSetRoot_0: Uint8Array,
                            setMembershipPath_0: { leaf: Uint8Array,
                                                   path: { sibling: { field: bigint
                                                                    },
@@ -150,8 +158,7 @@ export type ProvableCircuits<PS> = {
                                                         }[]
                                                 }): __compactRuntime.CircuitResults<PS, boolean>;
   proveAttributeMembershipOnce(context: __compactRuntime.CircuitContext<PS>,
-                               eventId_0: Uint8Array,
-                               fieldId_0: Uint8Array,
+                               requestId_0: Uint8Array,
                                value_0: Uint8Array,
                                rand_0: Uint8Array,
                                attributePath_0: { leaf: Uint8Array,
@@ -160,20 +167,18 @@ export type ProvableCircuits<PS> = {
                                                           goes_left: boolean
                                                         }[]
                                                 },
-                               publicSetRoot_0: Uint8Array,
                                setMembershipPath_0: { leaf: Uint8Array,
                                                       path: { sibling: { field: bigint
                                                                        },
                                                               goes_left: boolean
                                                             }[]
-                                                    },
-                               verifierId_0: Uint8Array,
-                               requestId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+                                                    }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type PureCircuits = {
   computePrivateMetadataCommit(value_0: Uint8Array, rand_0: Uint8Array): Uint8Array;
-  computeAttributeLeaf(fieldId_0: Uint8Array,
+  computeAttributeLeaf(eventId_0: Uint8Array,
+                       fieldId_0: Uint8Array,
                        value_0: Uint8Array,
                        rand_0: Uint8Array): Uint8Array;
 }
@@ -219,12 +224,17 @@ export type Circuits<PS> = {
                              value_0: Uint8Array,
                              rand_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   computeAttributeLeaf(context: __compactRuntime.CircuitContext<PS>,
+                       eventId_0: Uint8Array,
                        fieldId_0: Uint8Array,
                        value_0: Uint8Array,
                        rand_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
-  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+  publishDisclosureRequest(context: __compactRuntime.CircuitContext<PS>,
+                           label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
+                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
+                           requestId_0: Uint8Array,
                            value_0: Uint8Array,
                            rand_0: Uint8Array,
                            attributePath_0: { leaf: Uint8Array,
@@ -232,7 +242,6 @@ export type Circuits<PS> = {
                                                       goes_left: boolean
                                                     }[]
                                             },
-                           publicSetRoot_0: Uint8Array,
                            setMembershipPath_0: { leaf: Uint8Array,
                                                   path: { sibling: { field: bigint
                                                                    },
@@ -240,8 +249,7 @@ export type Circuits<PS> = {
                                                         }[]
                                                 }): __compactRuntime.CircuitResults<PS, boolean>;
   proveAttributeMembershipOnce(context: __compactRuntime.CircuitContext<PS>,
-                               eventId_0: Uint8Array,
-                               fieldId_0: Uint8Array,
+                               requestId_0: Uint8Array,
                                value_0: Uint8Array,
                                rand_0: Uint8Array,
                                attributePath_0: { leaf: Uint8Array,
@@ -250,15 +258,12 @@ export type Circuits<PS> = {
                                                           goes_left: boolean
                                                         }[]
                                                 },
-                               publicSetRoot_0: Uint8Array,
                                setMembershipPath_0: { leaf: Uint8Array,
                                                       path: { sibling: { field: bigint
                                                                        },
                                                               goes_left: boolean
                                                             }[]
-                                                    },
-                               verifierId_0: Uint8Array,
-                               requestId_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+                                                    }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type Ledger = {
@@ -346,6 +351,13 @@ export type Ledger = {
     member(key_0: Uint8Array): boolean;
     lookup(key_0: Uint8Array): boolean;
     [Symbol.iterator](): Iterator<[Uint8Array, boolean]>
+  };
+  disclosureRequests: {
+    isEmpty(): boolean;
+    size(): bigint;
+    member(key_0: Uint8Array): boolean;
+    lookup(key_0: Uint8Array): DisclosureRequest;
+    [Symbol.iterator](): Iterator<[Uint8Array, DisclosureRequest]>
   };
   readonly isPaused: boolean;
   readonly adminPk: Uint8Array;
