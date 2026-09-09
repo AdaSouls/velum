@@ -71,11 +71,13 @@ export type LedgerView = {
   issuers:        Iterable<[Uint8Array, IssuerRecord]>;
   burnedTokens:   Iterable<[bigint,    boolean]>;
   // Nullifiers spent via proveAttributeMembershipOnce (selective disclosure,
-  // single-use variant). proveAttributeMembership itself (the stateless,
-  // typical-case predicate proof) never touches ledger state, so it never
-  // appears in any diff here — by design, the indexer has no visibility
-  // into ordinary disclosure proofs at all.
-  usedDisclosures: Iterable<[Uint8Array, boolean]>;
+  // single-use variant). A Set now (was Map<_,Boolean> — membership is all
+  // that's ever checked, so iterates single values, not [k,v] pairs).
+  // proveAttributeMembership itself (the stateless, typical-case predicate
+  // proof) never touches ledger state, so it never appears in any diff
+  // here — by design, the indexer has no visibility into ordinary
+  // disclosure proofs at all.
+  usedDisclosures: Iterable<Uint8Array>;
   // requestId → the pinned question a verifier published (see
   // DisclosureRequest above). This is the ONLY thing that makes
   // proveAttributeMembership's predicate checkable by anyone — the
@@ -143,6 +145,21 @@ export function diffMap<K, V>(
     if (!curr.has(ks)) removed.push(entry);
   }
   return { added, removed, updated };
+}
+
+export type SetDiff = { added: Uint8Array[] };
+
+/**
+ * Diff two ledger-Set snapshots (element identity only — a Set has no
+ * separate value to compare, so there's no "updated" case). Used for
+ * usedDisclosures, which only ever grows (nullifiers are never removed).
+ */
+export function diffSet(prev: Iterable<Uint8Array>, curr: Iterable<Uint8Array>): SetDiff {
+  const prevHex = new Set<string>();
+  for (const x of prev) prevHex.add(toHex(x));
+  const added: Uint8Array[] = [];
+  for (const x of curr) if (!prevHex.has(toHex(x))) added.push(x);
+  return { added };
 }
 
 // ── Equality helpers ───────────────────────────────────────────────────────────

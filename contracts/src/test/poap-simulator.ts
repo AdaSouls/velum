@@ -173,34 +173,55 @@ export class PoapSimulator {
 
   // ── Events ────────────────────────────────────────────────────────────────
 
+  // Returns the DERIVED eventId (hash(organizerPk, label) — see event_key
+  // in poap.compact, the fix for the confirmed event-ID-squatting
+  // vulnerability), not a Ledger. `label` is what used to be a raw,
+  // caller-chosen eventId; callers must capture and use the return value
+  // for any subsequent lookup/claim/etc. — the label alone is no longer
+  // the on-chain key.
   createEvent(
-    eventId: Uint8Array,
+    label: Uint8Array,
     maxSupply: bigint,
     expiration: bigint,
     isPublicMint: boolean,
     metadataURI: string = 'ipfs://test-metadata',
     privateMetadataCommit: Uint8Array = new Uint8Array(32),
     privateAttributesRoot: Uint8Array = new Uint8Array(32),
-  ): Ledger {
-    this.circuitContext = this.contract.impureCircuits
+  ): Uint8Array {
+    const result = this.contract.impureCircuits
       .createEvent(
         this.circuitContext,
-        eventId,
+        label,
         maxSupply,
         expiration,
         isPublicMint,
         metadataURI,
         privateMetadataCommit,
         privateAttributesRoot,
-      )
-      .context;
+      );
+    this.circuitContext = result.context;
     this.savePrivateState();
-    return this.getLedger();
+    return result.result as Uint8Array;
+  }
+
+  // Pure helper mirroring the contract's computeEventId — predicts the id
+  // createEvent(label, ...) will assign for a given organizer, without a
+  // circuit context.
+  static computeEventId(organizer: Uint8Array, label: Uint8Array): Uint8Array {
+    return pureCircuits.computeEventId(organizer, label);
   }
 
   deactivateEvent(eventId: Uint8Array): Ledger {
     this.circuitContext = this.contract.impureCircuits
       .deactivateEvent(this.circuitContext, eventId)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
+  reactivateEvent(eventId: Uint8Array): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .reactivateEvent(this.circuitContext, eventId)
       .context;
     this.savePrivateState();
     return this.getLedger();
@@ -315,19 +336,21 @@ export class PoapSimulator {
     return result.result as Uint8Array;
   }
 
+  // Signals success purely by not throwing — the contract circuit itself
+  // returns [] now (see poap.compact: every failure path is an assert, so
+  // a Boolean return could only ever observably be true).
   proveAttributeMembership(
     requestId: Uint8Array,
     value: Uint8Array,
     rand: Uint8Array,
     attributePath: MerklePathArg,
     setMembershipPath: MerklePathArg,
-  ): boolean {
+  ): void {
     const result = this.contract.impureCircuits.proveAttributeMembership(
       this.circuitContext, requestId, value, rand, attributePath, setMembershipPath,
     );
     this.circuitContext = result.context;
     this.savePrivateState();
-    return result.result as boolean;
   }
 
   proveAttributeMembershipOnce(

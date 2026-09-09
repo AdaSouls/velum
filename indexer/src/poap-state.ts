@@ -13,6 +13,7 @@ import {
   type DisclosureRequest,
   snapshotMap,
   diffMap,
+  diffSet,
   toHex,
   bigintKey,
   issuerEquals,
@@ -227,18 +228,18 @@ async function handleDisclosures(
   curr: LedgerView,
   meta: TxMeta,
 ): Promise<void> {
-  const prevSnap = snapshotMap(prev.usedDisclosures, (bytes) => toHex(bytes));
-  const currSnap = snapshotMap(curr.usedDisclosures, (bytes) => toHex(bytes));
-  const diff = diffMap(prevSnap, currSnap, (a, b) => a === b);
+  // usedDisclosures is a Set<Bytes<32>> on-chain (was Map<_,Boolean>) —
+  // diffSet, not snapshotMap/diffMap, since a Set iterates single values.
+  const diff = diffSet(prev.usedDisclosures, curr.usedDisclosures);
 
-  for (const { k } of diff.added) {
+  for (const n of diff.added) {
     await client.query(
       `INSERT INTO disclosure_nullifiers (nullifier, spent_block, spent_tx)
        VALUES ($1, $2, $3)
        ON CONFLICT (nullifier) DO NOTHING`,
-      [toHex(k), meta.blockHeight.toString(), meta.txHash],
+      [toHex(n), meta.blockHeight.toString(), meta.txHash],
     );
-    console.log(`  [+] disclosure nullifier ${toHex(k).slice(0, 16)}… spent`);
+    console.log(`  [+] disclosure nullifier ${toHex(n).slice(0, 16)}… spent`);
   }
 }
 

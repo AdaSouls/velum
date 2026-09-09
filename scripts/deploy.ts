@@ -90,7 +90,7 @@ import {
   type EnvironmentConfiguration,
 } from '@midnight-ntwrk/testkit-js';
 
-import { Contract } from '../contracts/src/managed/poap/contract/index.js';
+import { Contract, pureCircuits } from '../contracts/src/managed/poap/contract/index.js';
 import { createWitnesses, type PoapPrivateState } from '../contracts/src/witnesses.js';
 
 type PoapCircuits =
@@ -129,10 +129,32 @@ const WALLET_SYNC_TIMEOUT_MS = 10 * 60_000;
 // much longer ceiling than shielded/unshielded needed rather than fail fast on a real network.
 const DUST_BALANCE_TIMEOUT_MS = 30 * 60_000;
 
-// Demo event parameters (TASK-016)
-const DEMO_EVENT_ID = new Uint8Array(32);
-DEMO_EVENT_ID[0] = 0xde;
-DEMO_EVENT_ID[1] = 0x01;
+// Demo event parameters (TASK-016). This is a LABEL now, not the raw
+// on-chain eventId — createEvent derives the real id as
+// event_key(organizerPk, label) (see poap.compact, the fix for the
+// confirmed event-ID-squatting vulnerability). See derivePk usage below
+// for how the real id gets computed for documentation.
+const DEMO_EVENT_LABEL = new Uint8Array(32);
+DEMO_EVENT_LABEL[0] = 0xde;
+DEMO_EVENT_LABEL[1] = 0x01;
+
+// Replicates the contract's derive_pk circuit off-chain:
+//   derive_pk(sk) = persistentHash<Vector<2,Bytes<32>>>([pad(32,"adasouls:pk:v1:"), sk])
+// persistentHash is plain SHA-256 over the raw concatenated bytes (struct/vector
+// fields are concatenated verbatim, no separators — confirmed via direct
+// inspection of the ledger source during a security audit of this contract),
+// and pad(32, "literal") right-pads the UTF-8 string with zero bytes to 32.
+// Needed here (rather than an extra on-chain getCallerPk() call) purely to
+// compute the demo event's real eventId for the deployment record below —
+// this script has no live devnet/proof-server in the environment that wrote
+// it to verify submitCallTx's return-value field name against, so deriving
+// it independently from a formula already confirmed correct is the safer
+// choice than guessing at an SDK response shape.
+function derivePk(secretKey: Uint8Array): Uint8Array {
+  const tag = Buffer.alloc(32);
+  Buffer.from('adasouls:pk:v1:', 'utf8').copy(tag);
+  return new Uint8Array(createHash('sha256').update(Buffer.concat([tag, Buffer.from(secretKey)])).digest());
+}
 
 // Matches devnet.yml's exposed ports (new-generation SDK devnet: node 0.22.5 /
 // indexer-standalone 4.2.1 / proof-server 8.1.0, per the official compatibility matrix
@@ -312,7 +334,7 @@ async function main() {
       // Fully public demo event — all-zero privateMetadataCommit/privateAttributesRoot
       // means "no private part" / "no attributes committed".
       args: [
-        DEMO_EVENT_ID,
+        DEMO_EVENT_LABEL,
         100n,
         0n,
         true,
@@ -323,7 +345,9 @@ async function main() {
     });
     logger.info(`Event created in block ${eventTx.public.blockHeight}, tx: ${eventTx.public.txHash}`);
 
-    const demoEventHex = Buffer.from(DEMO_EVENT_ID).toString('hex');
+    // The real on-chain key — NOT DEMO_EVENT_LABEL — see derivePk/comment above.
+    const demoEventId = pureCircuits.computeEventId(derivePk(secretKey), DEMO_EVENT_LABEL);
+    const demoEventHex = Buffer.from(demoEventId).toString('hex');
     const deploymentMd = `# Deployment Record
 
 ## POAP Contract — Midnight ${targetNetwork}

@@ -4,6 +4,31 @@
   "runtime-version": "0.16.0",
   "circuits": [
     {
+      "name": "computeEventId",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "organizer",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "label",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
       "name": "pause",
       "pure": false,
       "proof": true,
@@ -71,7 +96,7 @@
       "proof": true,
       "arguments": [
         {
-          "name": "eventId",
+          "name": "label",
           "type": {
             "type-name": "Bytes",
             "length": 32
@@ -120,13 +145,31 @@
         }
       ],
       "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "deactivateEvent",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
         "type-name": "Tuple",
         "types": [
         ]
       }
     },
     {
-      "name": "deactivateEvent",
+      "name": "reactivateEvent",
       "pure": false,
       "proof": true,
       "arguments": [
@@ -554,7 +597,9 @@
         }
       ],
       "result-type": {
-        "type-name": "Boolean"
+        "type-name": "Tuple",
+        "types": [
+        ]
       }
     },
     {
@@ -1022,13 +1067,10 @@
         11
       ],
       "exported": true,
-      "storage": "Map",
-      "key": {
+      "storage": "Set",
+      "type": {
         "type-name": "Bytes",
         "length": 32
-      },
-      "value": {
-        "type-name": "Boolean"
       }
     },
     {

@@ -102,10 +102,11 @@ export ledger burnedTokens: Map<Uint<64>, Boolean>;
 // selective-disclosure proofs (e.g. "redeem a perk once for proving X")
 // against replay, without revealing which wallet the disclosure was
 // about (see disclosure_nullifier). Most disclosures should use the
-// stateless proveAttributeMembership instead and never touch this map —
+// stateless proveAttributeMembership instead and never touch this set —
 // only use the Once variant when a disclosure must provably happen at
-// most once.
-export ledger usedDisclosures: Map<Bytes<32>, Boolean>;
+// most once. A Set, not a Map<_,Boolean>: membership is all that's ever
+// checked, so there's no second dimension worth paying ledger bytes for.
+export ledger usedDisclosures: Set<Bytes<32>>;
 
 // requestId → the pinned question a verifier published. Reading this via
 // lookup() is what makes eventId/fieldId/setRoot actually public and
@@ -116,8 +117,11 @@ export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 // Contract-level pause flag
 export ledger isPaused: Boolean;
 
-// Admin public key — set once at deployment
-export ledger adminPk: Bytes<32>;
+// Admin public key — set once at deployment. sealed: the compiler rejects
+// any write to this ledger field outside the constructor, converting the
+// contract's most security-critical invariant (admin identity never
+// changes) from a review obligation into a compile-time guarantee.
+export sealed ledger adminPk: Bytes<32>;
 
 constructor() {
   adminPk = disclose(derive_pk(local_sk()));
@@ -129,6 +133,15 @@ constructor() {
 witness local_sk(): Bytes<32>;
 
 // Persists a newly-claimed token to client-side state, keyed by event.
+// isSoulbound is intentionally NOT enforced on-chain: soulbound status is
+// meant to live in private state by design (see product-vision.md — this
+// is the specific privacy improvement over the original Milkomeda design,
+// where soulbound status was publicly visible). There is also no transfer
+// circuit in this contract, so every token is de facto non-transferable
+// regardless of this flag; it exists for the client's own bookkeeping
+// (e.g. UI treatment), not as an enforced guarantee. A malicious witness
+// implementation could record the wrong value for its own private
+// state — that only misleads the wallet that did it, not anyone else.
 witness store_token(
           tokenId: Uint<64>,
           issuerId: Bytes<32>,
@@ -173,6 +186,32 @@ circuit holder_event_key(holderPk: Bytes<32>, eventId: Bytes<32>): Bytes<32> {
 
 circuit is_admin(): Boolean {
   return adminPk == caller_pk();
+}
+
+// Derives an eventId from the organizer's own identity + a label they
+// choose, instead of letting the caller pick a raw eventId directly.
+// Fixes a confirmed vulnerability (event-ID squatting): with a
+// caller-chosen eventId and no other gate, whoever calls createEvent
+// first for a given id permanently becomes its organizer — an attacker
+// who front-runs a well-known id locks out the real organizer forever
+// (deactivateEvent doesn't free it either) and can mint counterfeit
+// tokens under it. Scoping the id to hash(organizer, label) means an
+// attacker can only squat their OWN namespace; no coordination between
+// organizers is required to avoid collisions, and createEvent stays
+// fully permissionless — this is not a registration gate.
+circuit event_key(organizer: Bytes<32>, label: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:event:v1:"), organizer, label]
+           );
+}
+
+// Pure off-chain helper: predict the eventId createEvent(label, ...) will
+// assign for a given organizer, before submitting the transaction (e.g.
+// so a frontend can show/link the id immediately, or so tests can locate
+// the event afterward). organizer is not secret — it's derive_pk(sk),
+// already public everywhere else in this contract.
+export circuit computeEventId(organizer: Bytes<32>, label: Bytes<32>): Bytes<32> {
+  return event_key(disclose(organizer), disclose(label));
 }
 
 // ── Pause / Unpause ───────────────────────────────────────────────────────────
@@ -221,6 +260,12 @@ export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
 // deactivateEvent/pause; the issuer registry above is opt-in metadata, not
 // a gate.
 //
+// `label` replaces what used to be a caller-chosen eventId directly — the
+// actual on-chain eventId is derived as event_key(caller_pk(), label) and
+// returned, so the same label from two different organizers (or the same
+// organizer reusing a label after a mistake) can never collide or be
+// squatted. Use computeEventId to predict it off-chain before submitting.
+//
 // privateMetadataCommit lets the organizer keep part of the event's
 // metadata hidden from everyone except whoever they later share the
 // (value, rand) opening with — see computePrivateMetadataCommit and
@@ -232,16 +277,16 @@ export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
 // proveAttributeMembership) — pass an all-zero Bytes<32> if the event has
 // no such structured attributes.
 export circuit createEvent(
-                 eventId: Bytes<32>,
+                 label: Bytes<32>,
                  maxSupply: Uint<64>,
                  expiration: Uint<64>,
                  isPublicMint: Boolean,
                  metadataURI: Opaque<"string">,
                  privateMetadataCommit: Bytes<32>,
                  privateAttributesRoot: Bytes<32>
-                 ): [] {
+                 ): Bytes<32> {
   assert(!isPaused, "Contract is paused");
-  const evId = disclose(eventId);
+  const lbl = disclose(label);
   const maxS = disclose(maxSupply);
   const exp = disclose(expiration);
   const pubMint = disclose(isPublicMint);
@@ -249,6 +294,7 @@ export circuit createEvent(
   const privCommit = disclose(privateMetadataCommit);
   const attrRoot = disclose(privateAttributesRoot);
   const issuerId = caller_pk();
+  const evId = event_key(issuerId, lbl);
   assert(!events.member(evId), "Event already exists");
 
   const ev = EventRecord { maxSupply: maxS,
@@ -261,6 +307,7 @@ export circuit createEvent(
                            privateMetadataCommit: privCommit,
                            privateAttributesRoot: attrRoot };
   events.insert(evId, ev);
+  return evId;
 }
 
 // Deactivate an event. Admin or the event's own organizer.
@@ -275,6 +322,28 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
                                 expiration: ev.expiration,
                                 organizer: ev.organizer,
                                 isActive: false,
+                                isPublicMint: ev.isPublicMint,
+                                metadataURI: ev.metadataURI,
+                                privateMetadataCommit: ev.privateMetadataCommit,
+                                privateAttributesRoot: ev.privateAttributesRoot };
+  events.insert(evId, updated);
+}
+
+// Reactivate a previously-deactivated event. Admin or the event's own
+// organizer — same authority as deactivateEvent. Without this, a mistaken
+// or malicious deactivation was permanent; every other field is carried
+// forward unchanged.
+export circuit reactivateEvent(eventId: Bytes<32>): [] {
+  const evId = disclose(eventId);
+  assert(!isPaused, "Contract is paused");
+  assert(events.member(evId), "Event does not exist");
+  const ev = events.lookup(evId);
+  assert(is_admin() || ev.organizer == caller_pk(), "Not authorized");
+  const updated = EventRecord { maxSupply: ev.maxSupply,
+                                minted: ev.minted,
+                                expiration: ev.expiration,
+                                organizer: ev.organizer,
+                                isActive: true,
                                 isPublicMint: ev.isPublicMint,
                                 metadataURI: ev.metadataURI,
                                 privateMetadataCommit: ev.privateMetadataCommit,
@@ -299,8 +368,26 @@ circuit mintTokenTo(
           tokenPrivCommit: Bytes<32>
           ): Uint<64> {
   assert(ev.isActive, "Event is not active");
+  assert(ev.expiration == 0 as Uint<64> || blockTimeLt(ev.expiration),
+         "Event has expired"
+         );
+  // NOTE: this is a total-mint cap, not a distinct-recipient cap. A wallet
+  // can present a fresh, unlinkable holder_pk per attempt (see holder_pk),
+  // so maxSupply bounds how many tokens an event can ever produce, not how
+  // many different people can hold one. Sybil resistance for "one per
+  // person" needs an out-of-band claim channel (single-use codes,
+  // organizer push-mint via mintTo) — it isn't and can't be a property of
+  // this on-chain check alone.
   assert(ev.maxSupply == 0 as Uint<64> || ev.minted < ev.maxSupply,
          "Event has reached maximum supply"
+         );
+  // An issuer who opted into the registry (registerIssuer) and was later
+  // deactivated (deactivateIssuer) can no longer have new tokens minted
+  // under their events — self-service claim or organizer push-mint alike.
+  // Issuers who never registered are unaffected (registration remains
+  // opt-in metadata, not a gate — see the Issuer Management section).
+  assert(!issuers.member(ev.organizer) || issuers.lookup(ev.organizer).isActive,
+         "Issuer is deactivated"
          );
 
   const key = holder_event_key(pk, eventId);
@@ -384,15 +471,27 @@ export circuit mintTo(
 // not just a self-service attendance badge.
 // Note: totalSupply and event minted counters are not decremented (Compact
 // Counter only increments). The token is marked burned on-chain.
+//
+// Only a SELF-burn frees the (holder, event) claim slot, letting the same
+// wallet claim that event again (e.g. they burned by mistake, or want a
+// fresh token). An issuer/admin revocation does NOT free it — that's the
+// credential-invalidation case this circuit exists for in the first
+// place, and it should stay a real exclusion, not a temporary one the
+// holder can immediately undo by re-claiming.
 export circuit burn(tokenId: Uint<64>): [] {
   const tId = disclose(tokenId);
   assert(!isPaused, "Contract is paused");
   assert(tokenOwner.member(tId), "Token does not exist");
   assert(!burnedTokens.member(tId), "Token already burned");
   const issuerId = tokenIssuer.lookup(tId);
-  const isOwner = tokenOwner.lookup(tId) == holder_pk(issuerId);
+  const ownerPk = tokenOwner.lookup(tId);
+  const isOwner = ownerPk == holder_pk(issuerId);
   assert(isOwner || is_admin() || issuerId == caller_pk(), "Not authorized to burn this token");
   burnedTokens.insert(tId, true);
+  if (isOwner) {
+    const evId = tokenEvent.lookup(tId);
+    eventHolderToken.remove(holder_event_key(ownerPk, evId));
+  }
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -422,7 +521,7 @@ export circuit getHolderPk(issuerId: Bytes<32>): Bytes<32> {
 // persistentCommit. Works for both event- and token-level commitments —
 // value is a digest of whatever private content you want to hide, rand is
 // fresh randomness you must keep to reveal later (never reuse rand).
-export circuit computePrivateMetadataCommit(value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+export pure circuit computePrivateMetadataCommit(value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return persistentCommit<Bytes<32>>(disclose(value), disclose(rand));
 }
 
@@ -436,6 +535,7 @@ export circuit revealPrivateMetadata(eventId: Bytes<32>, value: Bytes<32>, rand:
   const r = disclose(rand);
   assert(events.member(evId), "Event does not exist");
   const ev = events.lookup(evId);
+  assert(ev.privateMetadataCommit != default<Bytes<32>>, "Event has no private metadata");
   const commit = persistentCommit<Bytes<32>>(val, r);
   assert(commit == ev.privateMetadataCommit, "Value does not match the committed metadata");
   eventRevealedMetadata.insert(evId, val);
@@ -449,8 +549,11 @@ export circuit revealPrivateTokenMetadata(tokenId: Uint<64>, value: Bytes<32>, r
   const val = disclose(value);
   const r = disclose(rand);
   assert(tokenOwner.member(tId), "Token does not exist");
+  assert(tokenPrivateMetadataCommit.member(tId), "Token has no private metadata");
+  const storedCommit = tokenPrivateMetadataCommit.lookup(tId);
+  assert(storedCommit != default<Bytes<32>>, "Token has no private metadata");
   const commit = persistentCommit<Bytes<32>>(val, r);
-  assert(commit == tokenPrivateMetadataCommit.lookup(tId), "Value does not match the committed metadata");
+  assert(commit == storedCommit, "Value does not match the committed metadata");
   tokenRevealedMetadata.insert(tId, val);
 }
 
@@ -513,7 +616,17 @@ circuit attribute_leaf_hash(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes
 // version discloses its own inputs — the organizer already knows their own
 // field values; disclose() here only satisfies taint-tracking so the
 // result can be used outside a circuit, it does not leak anything new.
-export circuit computeAttributeLeaf(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+//
+// NEVER reuse `rand` across attribute leaves for the same event (same
+// warning as computePrivateMetadataCommit above, worth repeating here
+// specifically because building a whole attribute tree is exactly the
+// situation where reusing one rand "for convenience" is most tempting).
+// Reusing rand across fields makes leaves for known-value fields
+// interlinkable, and for low-entropy domains (country codes, category
+// enums) can make the entire tree brute-forceable once any one field is
+// revealed via a proof or a leak. Derive per-leaf randomness instead,
+// e.g. rand_i = H(masterRand, eventId, fieldId).
+export pure circuit computeAttributeLeaf(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return attribute_leaf_hash(disclose(eventId), disclose(fieldId), disclose(value), disclose(rand));
 }
 
@@ -536,6 +649,14 @@ circuit disclosure_request_key(verifier: Bytes<32>, label: Bytes<32>): Bytes<32>
 // requestId, which the verifier hands to whoever they want an answer from
 // (QR code, link, etc.) alongside setRoot's opening (the actual set
 // members) so the holder can build a real membership path.
+//
+// PRIVACY NOTE for verifiers: a set with very few members — a singleton
+// set especially — makes "membership" equivalent to full disclosure of
+// the value. The contract has no way to enforce a minimum set size from a
+// root alone; that's a property of what the verifier chooses to publish,
+// not something provable on-chain. Publish sets large/generic enough that
+// membership doesn't narrow the holder's actual value down to one option,
+// if the holder's privacy is meant to survive answering.
 export circuit publishDisclosureRequest(
                  label: Bytes<32>,
                  eventId: Bytes<32>,
@@ -558,9 +679,13 @@ export circuit publishDisclosureRequest(
 
 // Proves that a hidden attribute matches a previously-published
 // DisclosureRequest — i.e. that the event/field/set the request pinned
-// really does hold for a `value` the prover knows an opening for. Returns
-// true; never inserts anything into ledger state. Per the Compact circuit
-// classification already used elsewhere in this contract
+// really does hold for a `value` the prover knows an opening for. Signals
+// success purely by not throwing (same convention as revealPrivateMetadata
+// etc.) — every failure path here is an assert, so a `Boolean` return
+// could only ever observably be `true`; typing it that way invited exactly
+// that dead-code assumption downstream (see proveAttributeMembershipOnce's
+// history). Never inserts anything into ledger state. Per the Compact
+// circuit classification already used elsewhere in this contract
 // (getCallerPk/getHolderPk are witness-only and need no proof; anything
 // that reads ledger state like `events` becomes a ProvableCircuit), this
 // circuit DOES require proof generation and a submitted transaction, same
@@ -573,12 +698,13 @@ export circuit proveAttributeMembership(
                  rand: Bytes<32>,
                  attributePath: MerkleTreePath<8, Bytes<32>>,
                  setMembershipPath: MerkleTreePath<16, Bytes<32>>
-                 ): Boolean {
+                 ): [] {
   const rid = disclose(requestId);
   assert(disclosureRequests.member(rid), "Unknown disclosure request");
   const req = disclosureRequests.lookup(rid);
   assert(events.member(req.eventId), "Event does not exist");
   const ev = events.lookup(req.eventId);
+  assert(ev.privateAttributesRoot != default<Bytes<32>>, "Event has no committed attributes");
 
   // 1. The hidden (value, rand) opening really is one of this event's
   //    committed attribute leaves — value/rand never leave the circuit.
@@ -596,8 +722,6 @@ export circuit proveAttributeMembership(
   assert(setMembershipPath.leaf == value, "Set path does not match the hidden value");
   const computedSetRoot = upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field);
   assert(computedSetRoot == req.setRoot, "Value is not a member of the requested set");
-
-  return true;
 }
 
 // Nullifier keyed on the (real, on-chain, unforgeable) requestId alone —
@@ -627,9 +751,10 @@ export circuit proveAttributeMembershipOnce(
                  setMembershipPath: MerkleTreePath<16, Bytes<32>>
                  ): [] {
   assert(!isPaused, "Contract is paused");
-  const holds = proveAttributeMembership(requestId, value, rand, attributePath, setMembershipPath);
-  assert(holds, "Predicate does not hold");
+  // proveAttributeMembership signals success by not throwing — no boolean
+  // to check, it either aborts the whole transaction or it holds.
+  proveAttributeMembership(requestId, value, rand, attributePath, setMembershipPath);
   const n = disclosure_nullifier(requestId);
   assert(!usedDisclosures.member(n), "Disclosure already redeemed for this request");
-  usedDisclosures.insert(n, true);
+  usedDisclosures.insert(n);
 }
