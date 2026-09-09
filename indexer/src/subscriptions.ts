@@ -125,6 +125,8 @@ function emptyLedger(): LedgerView {
     events:          [],
     issuers:         [],
     burnedTokens:    [],
+    usedDisclosures: [],
+    disclosureRequests: [],
     isPaused: false,
     adminPk:  new Uint8Array(32),
   };

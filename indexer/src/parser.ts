@@ -44,6 +44,17 @@ export type IssuerRecord = {
   isActive: boolean;
 };
 
+// A verifier-published disclosure question — see publishDisclosureRequest /
+// proveAttributeMembership in poap.compact. Immutable once published (the
+// contract asserts !member(rid) before insert), so there is no "updated"
+// case to diff, only "added".
+export type DisclosureRequest = {
+  verifier: Uint8Array;
+  eventId: Uint8Array;
+  fieldId: Uint8Array;
+  setRoot: Uint8Array;
+};
+
 export type LedgerView = {
   totalSupply: bigint;
   tokenOwner:                 Iterable<[bigint,    Uint8Array]>;
@@ -65,6 +76,12 @@ export type LedgerView = {
   // appears in any diff here — by design, the indexer has no visibility
   // into ordinary disclosure proofs at all.
   usedDisclosures: Iterable<[Uint8Array, boolean]>;
+  // requestId → the pinned question a verifier published (see
+  // DisclosureRequest above). This is the ONLY thing that makes
+  // proveAttributeMembership's predicate checkable by anyone — the
+  // eventId/fieldId/setRoot it points at are public precisely because
+  // they're readable here, not because the prover disclosed them.
+  disclosureRequests: Iterable<[Uint8Array, DisclosureRequest]>;
   isPaused: boolean;
   adminPk: Uint8Array;
 };
@@ -132,6 +149,18 @@ export function diffMap<K, V>(
 
 export function issuerEquals(a: IssuerRecord, b: IssuerRecord): boolean {
   return a.isActive === b.isActive && toHex(a.organizerPk) === toHex(b.organizerPk);
+}
+
+// Requests are immutable once published (see DisclosureRequest above), so
+// this should never actually see an "updated" pair in practice — provided
+// for diffMap's sake, not because a real update path exists.
+export function disclosureRequestEquals(a: DisclosureRequest, b: DisclosureRequest): boolean {
+  return (
+    toHex(a.verifier) === toHex(b.verifier) &&
+    toHex(a.eventId) === toHex(b.eventId) &&
+    toHex(a.fieldId) === toHex(b.fieldId) &&
+    toHex(a.setRoot) === toHex(b.setRoot)
+  );
 }
 
 export function eventEquals(a: EventRecord, b: EventRecord): boolean {

@@ -68,6 +68,24 @@ CREATE TABLE IF NOT EXISTS disclosure_nullifiers (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Selective disclosure: requests published via publishDisclosureRequest — the
+-- pinned (eventId, fieldId, setRoot) a holder must prove against (see
+-- proveAttributeMembership in poap.compact). Public by design: this is what
+-- makes the predicate checkable at all, not a privacy leak — value/rand
+-- (the actual hidden attribute) never appear anywhere in this schema.
+-- Immutable once published (contract-enforced), so no updated/deactivated
+-- columns are needed.
+CREATE TABLE IF NOT EXISTS disclosure_requests (
+  request_id      TEXT    PRIMARY KEY,      -- hex of Bytes[32]
+  verifier_pk     TEXT    NOT NULL,         -- hex of Bytes[32] — caller_pk() of whoever published it
+  event_id        TEXT    NOT NULL REFERENCES events(event_id),
+  field_id        TEXT    NOT NULL,         -- hex of Bytes[32]
+  set_root        TEXT    NOT NULL,         -- hex of Bytes[32] — Merkle root of the set being checked against
+  published_block BIGINT,
+  published_tx    TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Idempotent upgrade path for columns added after the initial table creation (CREATE TABLE IF
 -- NOT EXISTS above is a no-op against an already-initialized table).
 ALTER TABLE events ADD COLUMN IF NOT EXISTS metadata_uri TEXT NOT NULL DEFAULT '';
@@ -79,3 +97,5 @@ CREATE INDEX IF NOT EXISTS tokens_owner_pk_idx  ON tokens(owner_pk);
 CREATE INDEX IF NOT EXISTS tokens_issuer_pk_idx ON tokens(issuer_pk);
 CREATE INDEX IF NOT EXISTS tokens_first_event_id_idx ON tokens(first_event_id);
 CREATE INDEX IF NOT EXISTS events_issuer_pk_idx ON events(issuer_pk);
+CREATE INDEX IF NOT EXISTS disclosure_requests_verifier_pk_idx ON disclosure_requests(verifier_pk);
+CREATE INDEX IF NOT EXISTS disclosure_requests_event_id_idx ON disclosure_requests(event_id);

@@ -10,12 +10,14 @@ import {
   type LedgerView,
   type EventRecord,
   type IssuerRecord,
+  type DisclosureRequest,
   snapshotMap,
   diffMap,
   toHex,
   bigintKey,
   issuerEquals,
   eventEquals,
+  disclosureRequestEquals,
 } from './parser.js';
 
 export type TxMeta = { txHash: string; blockHeight: bigint };
@@ -34,6 +36,7 @@ export async function applyStateDiff(
     await handleEvents(client, prev, curr, meta);
     await handleTokens(client, prev, curr, meta);
     await handleDisclosures(client, prev, curr, meta);
+    await handleDisclosureRequests(client, prev, curr, meta);
     await client.query('COMMIT');
     console.log(`[state] ${operation} @ block ${meta.blockHeight} tx ${meta.txHash.slice(0, 16)}…`);
   } catch (err) {
@@ -236,6 +239,42 @@ async function handleDisclosures(
       [toHex(k), meta.blockHeight.toString(), meta.txHash],
     );
     console.log(`  [+] disclosure nullifier ${toHex(k).slice(0, 16)}… spent`);
+  }
+}
+
+// ── Disclosure Requests ───────────────────────────────────────────────────────────
+//
+// Requests are immutable once published (the contract asserts !member(rid)
+// before insert), so only "added" is meaningful here — an "updated" pair
+// would indicate a bug elsewhere, not a legitimate state transition.
+
+async function handleDisclosureRequests(
+  client: PoolClient,
+  prev: LedgerView,
+  curr: LedgerView,
+  meta: TxMeta,
+): Promise<void> {
+  const prevSnap = snapshotMap(prev.disclosureRequests, (bytes) => toHex(bytes));
+  const currSnap = snapshotMap(curr.disclosureRequests, (bytes) => toHex(bytes));
+  const diff = diffMap(prevSnap, currSnap, disclosureRequestEquals);
+
+  for (const { k, v } of diff.added) {
+    await client.query(
+      `INSERT INTO disclosure_requests
+         (request_id, verifier_pk, event_id, field_id, set_root, published_block, published_tx)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (request_id) DO NOTHING`,
+      [
+        toHex(k),
+        toHex(v.verifier),
+        toHex(v.eventId),
+        toHex(v.fieldId),
+        toHex(v.setRoot),
+        meta.blockHeight.toString(),
+        meta.txHash,
+      ],
+    );
+    console.log(`  [+] disclosure request ${toHex(k).slice(0, 16)}… published`);
   }
 }
 
