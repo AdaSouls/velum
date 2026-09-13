@@ -208,7 +208,12 @@ async function main() {
     // point at an already-running one (`docker compose -f devnet.yml up -d proof-server`) instead
     // of the URL .start() would otherwise have filled in from its own managed container.
     const testEnv = getTestEnvironment(logger);
-    envConfig = { ...testEnv.getEnvironmentConfiguration(), proofServer: 'http://localhost:6300' };
+    // 127.0.0.1, not localhost: on a host where localhost resolves to ::1 before 127.0.0.1 and the
+    // container only publishes the IPv4 mapping (podman rootless slirp4netns/pasta networking,
+    // confirmed 2026-09-10 — curl to localhost:6300 got "Recv failure: Connection reset by peer"
+    // while 127.0.0.1:6300 worked), the IPv6 attempt fails the connection outright instead of
+    // falling back.
+    envConfig = { ...testEnv.getEnvironmentConfiguration(), proofServer: 'http://127.0.0.1:6300' };
     logger.info(`Network config: ${JSON.stringify(envConfig)}`);
   }
 
