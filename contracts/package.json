@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "compact": "compact compile +0.31.1 compact/poap.compact src/managed/poap/",
+    "compact:shell:gen-source": "sed -E 's/^export circuit /circuit /' compact/poap.compact > compact/.poap-shell.compact",
+    "compact:shell": "npm run compact:shell:gen-source && compact compile +0.31.1 --skip-zk compact/.poap-shell.compact src/managed/poap-shell/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

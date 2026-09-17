@@ -17,7 +17,7 @@ name: midnight-devnet
 
 services:
   node:
-    image: midnightntwrk/midnight-node:0.22.5
+    image: docker.io/midnightntwrk/midnight-node:1.0.2
     container_name: midnight-node
     ports:
       - '9944:9944'
@@ -32,7 +32,7 @@ services:
       SIDECHAIN_BLOCK_BENEFICIARY: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e'
 
   indexer:
-    image: midnightntwrk/indexer-standalone:4.3.3
+    image: docker.io/midnightntwrk/indexer-standalone:4.3.3
     container_name: midnight-indexer
     ports:
       - '8088:8088'
@@ -44,6 +44,14 @@ services:
       APP__INFRA__PUB_SUB__PASSWORD: 'indexer'
       APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: 'indexer'
       APP__INFRA__SECRET: '303132333435363738393031323334353637383930313233343536373839303132'
+      # Required as of indexer-standalone 4.3.3, no default — non-empty placeholder is fine when
+      # not exercising SPO/stake-pool features (this devnet doesn't). See indexer-standalone/
+      # config.yaml:41-44 and the blockfrost_id row in the configuration reference.
+      APP__INFRA__SPO_NODE__BLOCKFROST_ID: 'dummy-not-using-spo'
+      # Defaults to ws://localhost:9944, which inside this container is itself, not the node
+      # service — that connection-refused failure crashes the whole indexer-standalone process
+      # (spo-indexer's exit is treated as fatal), not just the SPO sub-component.
+      APP__INFRA__SPO_NODE__URL: 'ws://node:9944'
     healthcheck:
       test: ['CMD-SHELL', 'cat /var/run/indexer-standalone/running']
       interval: 10s
@@ -55,7 +63,7 @@ services:
         condition: service_healthy
 
   proof-server:
-    image: midnightntwrk/proof-server:8.1.0
+    image: docker.io/midnightntwrk/proof-server:8.1.0
     container_name: midnight-proof-server
     command: ['midnight-proof-server -v']
     ports:
@@ -67,7 +75,7 @@ services:
   # unrelated to the Midnight SDK generation, merged in from the old
   # docker-compose.devnet.yml (now removed).
   poap-pg:
-    image: postgres:15
+    image: docker.io/library/postgres:15
     container_name: poap-indexer-pg
     ports:
       - '5434:5432'

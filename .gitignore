@@ -1,9 +1,13 @@
 .env.local
 .env
 *.env
+.env.*.local
 node_modules/
 .DS_Store
 contracts/src/managed/poap/keys/
+contracts/compact/.poap-shell.compact
+contracts/src/managed/poap-shell/
 scripts/logs/
 logs/
 scripts/midnight-level-db/
+midnight-level-db/

@@ -80,9 +80,16 @@ import pino from 'pino';
 import { firstValueFrom } from 'rxjs';
 import { filter, timeout } from 'rxjs/operators';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-import { deployContract, submitCallTx, type DeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
+import {
+  deployContract,
+  submitCallTx,
+  submitInsertVerifierKeyTx,
+  findDeployedContract,
+  type DeployedContract,
+} from '@midnight-ntwrk/midnight-js-contracts';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
 import { nativeToken } from '@midnight-ntwrk/ledger-v8';
+import { signingKeyFromBip340 } from '@midnight-ntwrk/compact-runtime';
 import {
   MidnightWalletProvider,
   initializeMidnightProviders,
@@ -91,6 +98,7 @@ import {
 } from '@midnight-ntwrk/testkit-js';
 
 import { Contract, pureCircuits } from '../contracts/src/managed/poap/contract/index.js';
+import { Contract as ShellContract } from '../contracts/src/managed/poap-shell/contract/index.js';
 import { createWitnesses, type PoapPrivateState } from '../contracts/src/witnesses.js';
 
 type PoapCircuits =
@@ -113,6 +121,32 @@ type PoapCircuits =
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = path.resolve(__dirname, '..', 'contracts');
 const ZK_CONFIG_PATH = path.join(CONTRACTS_DIR, 'src', 'managed', 'poap');
+// "Shell" build: same source, same ledger/constructor, but every `export circuit` (proof-
+// requiring) demoted to plain `circuit` via `contracts/package.json`'s `compact:shell` script
+// (`sed -E 's/^export circuit /circuit /'`) — 0 exported/provable circuits, so it compiles with
+// no verifier keys and its own deploy transaction is ~750 bytes. See STAGED DEPLOYMENT below.
+const SHELL_ZK_CONFIG_PATH = path.join(CONTRACTS_DIR, 'src', 'managed', 'poap-shell');
+// Every circuit requiring a verifier key (contract-info.json's `proof: true` entries) — must be
+// registered one at a time onto the shell contract after deploy. Keep in sync with poap.compact's
+// `export circuit` declarations; run `cat contracts/src/managed/poap/compiler/contract-info.json
+// | jq '.circuits[] | select(.proof) | .name'` to regenerate this list after adding a circuit.
+const PROOF_CIRCUIT_IDS = [
+  'pause',
+  'unpause',
+  'registerIssuer',
+  'deactivateIssuer',
+  'createEvent',
+  'deactivateEvent',
+  'reactivateEvent',
+  'claim',
+  'mintTo',
+  'burn',
+  'revealPrivateMetadata',
+  'revealPrivateTokenMetadata',
+  'publishDisclosureRequest',
+  'proveAttributeMembership',
+  'proveAttributeMembershipOnce',
+] as const;
 
 // Genesis wallet seed — the `dev` chain spec (devnet.yml's CFG_PRESET: 'dev') pre-mints NIGHT
 // to the wallet derived from this seed. Only valid on 'undeployed' (local devnet); every other
@@ -127,7 +161,15 @@ const WALLET_SYNC_TIMEOUT_MS = 10 * 60_000;
 // unpersisted (fresh WalletFacade per run), so every run has to catch up on the full DUST ledger
 // history from genesis, same as shielded's ~7min first-sync on preprod on 2026-08-28; give it a
 // much longer ceiling than shielded/unshielded needed rather than fail fast on a real network.
-const DUST_BALANCE_TIMEOUT_MS = 30 * 60_000;
+// Shortened 2026-09-17: confirmed via the preprod wallet UI that a freshly-registered NIGHT
+// UTXO's DUST genuinely reads 0 until its first coin individually matures (each coin shows its
+// own countdown, "X READY" vs "Y MATURING" — the UI's "Available Balance" figure is the
+// cumulative virtual/accruing amount across MATURING coins, not anything spendable yet). So this
+// was never a stale-read bug — the loop below only warns and proceeds either way regardless of
+// what it finds, and the real signal is whether the deploy transaction itself succeeds, so there
+// is no reason to burn 30 minutes here waiting on a balance that legitimately won't be positive
+// until a coin matures.
+const DUST_BALANCE_TIMEOUT_MS = 20_000;
 
 // Demo event parameters (TASK-016). This is a LABEL now, not the raw
 // on-chain eventId — createEvent derives the real id as
@@ -269,16 +311,25 @@ async function main() {
   }
 
   logger.info(`Checking DUST balance (up to ${DUST_BALANCE_TIMEOUT_MS / 60_000}min)...`);
+  // Polled in short-lived snapshots (firstValueFrom(wallet.wallet.state()) grabs the current
+  // value and completes immediately) rather than one subscription kept open for the full
+  // ceiling — confirmed 2026-09-15 that holding filter()+timeout() open against wallet.state()
+  // for ~28min grows heap to 3.5GB+ and crashes with "JavaScript heap out of memory" before the
+  // 30min timeout ever fires. Root cause not isolated (RxJS operator retention vs. the SDK's own
+  // per-emission state accumulation — see midnight-wallet:sdk-regression-check, no version drift
+  // found), but bounding each subscription's lifetime to one snapshot sidesteps it either way.
+  const DUST_POLL_INTERVAL_MS = 15_000;
   let dustBalance = 0n;
-  try {
-    const dustState = await firstValueFrom(
-      wallet.wallet.state().pipe(
-        filter((s) => s.dust.balance(new Date()) > 0n),
-        timeout(DUST_BALANCE_TIMEOUT_MS),
-      ),
-    );
-    dustBalance = dustState.dust.balance(new Date());
-  } catch {
+  const dustPollDeadline = Date.now() + DUST_BALANCE_TIMEOUT_MS;
+  for (;;) {
+    const snapshot = await firstValueFrom(wallet.wallet.state());
+    dustBalance = snapshot.dust.balance(new Date());
+    const rssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+    logger.info(`  poll: dust=${dustBalance} rss=${rssMb}MB`);
+    if (dustBalance > 0n || Date.now() >= dustPollDeadline) break;
+    await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
+  }
+  if (dustBalance === 0n) {
     logger.warn(
       `DUST balance still 0 after ${DUST_BALANCE_TIMEOUT_MS / 60_000}min — deploy will likely fail with an insufficient-fee error. ` +
         'Retroactive DUST accrues from each NIGHT UTXO\'s creation time at ~0.00083 DUST/sec per ' +
@@ -310,6 +361,10 @@ async function main() {
     CompiledContract.withWitnesses(createWitnesses(secretKey)),
     CompiledContract.withCompiledFileAssets(ZK_CONFIG_PATH),
   );
+  const CompiledPoapShellContract = CompiledContract.make('PoapContractShell', ShellContract).pipe(
+    CompiledContract.withWitnesses(createWitnesses(secretKey)),
+    CompiledContract.withCompiledFileAssets(SHELL_ZK_CONFIG_PATH),
+  );
 
   const providers = initializeMidnightProviders<PoapCircuits, PoapPrivateState>(wallet, envConfig, {
     privateStateStoreName: 'poap-deploy-state',
@@ -318,17 +373,77 @@ async function main() {
 
   const initialPrivateState: PoapPrivateState = { secretKey, tokens: {} };
 
+  // The contract's on-chain maintenance authority (CMA) key — separate from `secretKey` (the
+  // contract's own local_sk witness) by domain-separating the hash input, and deliberately
+  // deterministic (derived from the deploying wallet's seed) rather than left for deployContract
+  // to sample randomly: a sampled key is stored ONLY in the local `poap-deploy-state` LevelDB
+  // store, and it IS the authority that can add the remaining 14 circuits in the staging loop
+  // below. Losing that store between the shell deploy and finishing staging would permanently
+  // freeze the contract at whatever circuits were inserted so far — recoverable here since the
+  // same wallet seed always re-derives the same key.
+  const maintenanceSigningKey = signingKeyFromBip340(
+    createHash('sha256').update(walletSeedBytes).update('poap-maintenance-authority').digest(),
+  );
+
   try {
-    logger.info('Deploying POAP contract...');
-    const deployed: DeployedContract<Contract> = await deployContract<Contract>(providers, {
-      compiledContract: CompiledPoapContract,
+    // ── STAGED DEPLOYMENT ──────────────────────────────────────────────────────────────────
+    // Deploying all 15 proof-requiring circuits' verifier keys in one transaction (the
+    // straightforward `deployContract(providers, { compiledContract: CompiledPoapContract, ... })`
+    // this used to be) is rejected by the node with "1010: Invalid Transaction: Transaction would
+    // exhaust the block limits" — confirmed 2026-09-17 on both midnight-node 0.22.5 and 1.0.2 (the
+    // version preprod runs), so it is not a node-version bug. Measured: the extrinsic is only
+    // ~36KB (well under the 768KB block-length limit) — this is a WEIGHT rejection, and it scales
+    // linearly at ~2,211 bytes of deploy weight per proof-requiring circuit (each verifier key is
+    // exactly 2,119 bytes regardless of the circuit's own complexity — a 10MB prover key's
+    // verifier key costs the same as a 3KB one). The last version of this contract that deployed
+    // successfully in one transaction (docs/deployment.md, 2026-08-05) had 9 such circuits; the
+    // selective-disclosure feature (commits 9f9cf9e/19a0211/cb0ab50) brought it to 15.
+    //
+    // Fix: deploy a "shell" build of the same contract (same ledger layout and constructor,
+    // verified byte-identical — see contracts/package.json's `compact:shell` script — but every
+    // circuit un-exported, so 0 verifier keys and a ~750-byte deploy transaction), then register
+    // each of the 15 circuits' verifier keys one at a time via submitInsertVerifierKeyTx
+    // (~2.4KB per transaction, independently confirmed against a real ledger simulation). This
+    // makes deploy weight O(1) forever — the contract can keep growing without ever hitting this
+    // limit again, since maintenance-authority inserts are one-per-transaction by construction.
+    //
+    // Do NOT call findDeployedContract with the full contract until every circuit is inserted:
+    // its verifyContractState check throws ContractTypeError while any operation is missing.
+    logger.info('Deploying POAP contract shell (0 circuits, staging verifier keys next)...');
+    const deployedShell: DeployedContract<ShellContract> = await deployContract<ShellContract>(providers, {
+      compiledContract: CompiledPoapShellContract,
       privateStateId: PRIVATE_STATE_ID,
       initialPrivateState,
+      signingKey: maintenanceSigningKey,
     });
 
-    const contractAddress = deployed.deployTxData.public.contractAddress;
-    const deployTxHash = deployed.deployTxData.public.txHash;
-    logger.info(`Contract deployed! Address: ${contractAddress}, tx: ${deployTxHash}`);
+    const contractAddress = deployedShell.deployTxData.public.contractAddress;
+    const deployTxHash = deployedShell.deployTxData.public.txHash;
+    logger.info(`Shell deployed! Address: ${contractAddress}, tx: ${deployTxHash}`);
+
+    logger.info(`Staging ${PROOF_CIRCUIT_IDS.length} circuits' verifier keys...`);
+    for (const circuitId of PROOF_CIRCUIT_IDS) {
+      const currentState = await providers.publicDataProvider.queryContractState(contractAddress);
+      if (currentState?.operation(circuitId)) {
+        logger.info(`  ${circuitId}: already present, skipping (resumed run)`);
+        continue;
+      }
+      const verifierKey = await providers.zkConfigProvider.getVerifierKey(circuitId);
+      await submitInsertVerifierKeyTx(providers, CompiledPoapContract, contractAddress, circuitId, verifierKey);
+      logger.info(`  ${circuitId}: inserted`);
+    }
+    logger.info('All circuits staged.');
+
+    // Confirms every inserted verifier key matches what the full compiled contract expects
+    // (verifyContractState) and re-persists maintenanceSigningKey against the full contract's
+    // handle, in case more circuits need staging in a future run.
+    await findDeployedContract<Contract>(providers, {
+      compiledContract: CompiledPoapContract,
+      contractAddress,
+      privateStateId: PRIVATE_STATE_ID,
+      initialPrivateState,
+      signingKey: maintenanceSigningKey,
+    });
 
     logger.info('Creating demo event...');
     const eventTx = await submitCallTx<Contract, 'createEvent'>(providers, {
