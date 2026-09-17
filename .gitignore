@@ -11,3 +11,4 @@ scripts/logs/
 logs/
 scripts/midnight-level-db/
 midnight-level-db/
+dist-share/
