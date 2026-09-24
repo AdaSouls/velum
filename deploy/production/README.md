@@ -22,8 +22,9 @@ https://$API_DOMAIN/zk/poap/…            → static ZK artifacts
 
 Verified locally (podman, 2026-09-24): the image builds, migrations apply, the indexer connects to
 the preprod indexer over WebSocket, CORS is applied, and Caddy serves `/health`, `/api/*` and
-`/zk/poap/*` (with `Access-Control-Allow-Origin: *`). Not yet verified: TLS issuance on a real
-domain, and the indexer against the new contract address (pending the preprod deploy).
+`/zk/poap/*` (with `Access-Control-Allow-Origin: *`). Also verified against the live preprod
+contract (`deployments/preprod.md`): the containerized indexer follows it and `/api/events`
+returns its demo event. Not yet verified: TLS issuance on a real domain.
 
 ---
 
