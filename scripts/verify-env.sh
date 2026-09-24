@@ -70,6 +70,5 @@ if [[ $FAIL -gt 0 ]]; then
   echo "  1. Install Node.js 20+: https://nodejs.org"
   echo "  2. Install Midnight toolchain: npx @midnight-ntwrk/midnight-js-toolchain install"
   echo "  3. Install Docker Desktop: https://docs.docker.com/get-docker/"
-  echo "  4. See docs/environment.md for the full setup guide"
   exit 1
 fi

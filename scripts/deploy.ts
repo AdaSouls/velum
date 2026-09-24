@@ -55,9 +55,9 @@
  *   npx tsx scripts/deploy.ts                                              # local devnet
  *   MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex> npx tsx scripts/deploy.ts   # preprod
  *
- * Outputs the deployed contract address and saves it to docs/deployment.<network>.md and
- * .env.<network>.local — 'undeployed' keeps the original unsuffixed docs/deployment.md and
- * .env.local filenames so the existing local workflow (docs/environment.md) doesn't change.
+ * Outputs the deployed contract address and saves it to deployments/<network>.md and
+ * .env.<network>.local — 'undeployed' keeps the original unsuffixed .env.local filename so the
+ * existing local workflow doesn't change.
  */
 
 import path from 'node:path';
@@ -181,6 +181,48 @@ const DUST_BALANCE_TIMEOUT_MS = 20_000;
 // registered and generating DUST. So: keep polling while the dust sync is still behind, up to this
 // hard ceiling (override with DUST_SYNC_TIMEOUT_MIN).
 const DUST_SYNC_TIMEOUT_MS = Number(process.env['DUST_SYNC_TIMEOUT_MIN'] ?? 180) * 60_000;
+// A positive balance is NOT enough to start transacting. Confirmed 2026-09-24 on preprod: the
+// balance turned positive at dust event ~1,502,900 of ~1,557,300, the deploy went out immediately,
+// and the node rejected it with "1010: Invalid Transaction: Custom error: 170"
+// (InvalidDustSpendProof) — the fee's dust spend was proven against a dust-tree state that far
+// behind the chain tip. So the wallet must also be caught up: within this many events of the
+// indexer's latest dust ledger event (dustLedgerHead below).
+const DUST_CAUGHT_UP_MAX_GAP = 50n;
+
+// Latest dust ledger event id known to the indexer — the target the dust wallet's
+// progress.appliedIndex has to reach. The wallet's own progress.highestIndex read 0 throughout a
+// full preprod sync (and isStrictlyComplete() never turned true), so it can't be used for this.
+// Returns undefined on any failure; the caller then keeps waiting.
+async function dustLedgerHead(indexerWS: string): Promise<bigint | undefined> {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(indexerWS, 'graphql-transport-ws');
+    const done = (v: bigint | undefined) => {
+      clearTimeout(timer);
+      ws.removeAllListeners();
+      ws.on('error', () => {});
+      ws.close();
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(undefined), 15_000);
+    ws.on('error', () => done(undefined));
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'connection_init' })));
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'connection_ack') {
+        ws.send(JSON.stringify({
+          id: '1',
+          type: 'subscribe',
+          payload: { query: 'subscription { dustLedgerEvents(id: 0) { maxId } }' },
+        }));
+      } else if (msg.type === 'next') {
+        const maxId = msg.payload?.data?.dustLedgerEvents?.maxId;
+        done(maxId === undefined ? undefined : BigInt(maxId));
+      } else if (msg.type === 'error') {
+        done(undefined);
+      }
+    });
+  });
+}
 
 // Demo event parameters (TASK-016). This is a LABEL now, not the raw
 // on-chain eventId — createEvent derives the real id as
@@ -338,14 +380,17 @@ async function main() {
   for (;;) {
     const snapshot = await firstValueFrom(wallet.wallet.state());
     dustBalance = snapshot.dust.balance(new Date());
-    const dustSynced = snapshot.dust.progress.isStrictlyComplete();
+    const applied = snapshot.dust.progress.appliedIndex;
+    const head = await dustLedgerHead(envConfig.indexerWS);
+    const dustSynced =
+      snapshot.dust.progress.isStrictlyComplete() || (head !== undefined && applied + DUST_CAUGHT_UP_MAX_GAP >= head);
     const rssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
     logger.info(
-      `  poll: dust=${dustBalance} dustSync=${snapshot.dust.progress.appliedIndex}` +
+      `  poll: dust=${dustBalance} dustSync=${applied}/${head ?? '?'}` +
         `${dustSynced ? ' (complete)' : ''} rss=${rssMb}MB`,
     );
     const elapsed = Date.now() - dustPollStart;
-    if (dustBalance > 0n) break;
+    if (dustBalance > 0n && dustSynced) break;
     if (dustSynced && elapsed >= DUST_BALANCE_TIMEOUT_MS) break;
     if (elapsed >= DUST_SYNC_TIMEOUT_MS) break;
     await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
@@ -356,6 +401,11 @@ async function main() {
         'Retroactive DUST accrues from each NIGHT UTXO\'s creation time at ~0.00083 DUST/sec per ' +
         'NIGHT (docs.midnight.network/concepts/dust-architecture); if this UTXO is very recently ' +
         'funded, wait longer and retry.',
+    );
+  } else if (Date.now() - dustPollStart >= DUST_SYNC_TIMEOUT_MS) {
+    logger.warn(
+      'Hit DUST_SYNC_TIMEOUT_MIN with a positive balance but the dust wallet still behind the ' +
+        'indexer — transactions will likely be rejected with InvalidDustSpendProof (170).',
     );
   }
   logger.info(`DUST balance: ${dustBalance}`);
@@ -417,7 +467,7 @@ async function main() {
     // linearly at ~2,211 bytes of deploy weight per proof-requiring circuit (each verifier key is
     // exactly 2,119 bytes regardless of the circuit's own complexity — a 10MB prover key's
     // verifier key costs the same as a 3KB one). The last version of this contract that deployed
-    // successfully in one transaction (docs/deployment.md, 2026-08-05) had 9 such circuits; the
+    // successfully in one transaction (2026-08-05, local devnet) had 9 such circuits; the
     // selective-disclosure feature (commits 9f9cf9e/19a0211/cb0ab50) brought it to 15.
     //
     // Fix: deploy a "shell" build of the same contract (same ledger layout and constructor,
@@ -513,13 +563,15 @@ async function main() {
 | Block Height | ${eventTx.public.blockHeight} |
 `;
 
-    // 'undeployed' keeps the original unsuffixed filenames so the existing local workflow
-    // (docs/environment.md) and anything a developer has already scripted around it don't change.
-    const deploymentMdName = targetNetwork === 'undeployed' ? 'deployment.md' : `deployment.${targetNetwork}.md`;
+    // 'undeployed' keeps the original unsuffixed .env filename so the existing local workflow and
+    // anything a developer has already scripted around it don't change.
+    const deploymentMdName = `${targetNetwork}.md`;
     const envFileName = targetNetwork === 'undeployed' ? '.env.local' : `.env.${targetNetwork}.local`;
 
-    fs.writeFileSync(path.join(CONTRACTS_DIR, '..', 'docs', deploymentMdName), deploymentMd);
-    logger.info(`Saved to docs/${deploymentMdName}`);
+    const deploymentsDir = path.join(CONTRACTS_DIR, '..', 'deployments');
+    fs.mkdirSync(deploymentsDir, { recursive: true });
+    fs.writeFileSync(path.join(deploymentsDir, deploymentMdName), deploymentMd);
+    logger.info(`Saved to deployments/${deploymentMdName}`);
 
     const envContent = `MIDNIGHT_NETWORK_ID=${targetNetwork}
 MIDNIGHT_NODE_URL=${envConfig.nodeWS}

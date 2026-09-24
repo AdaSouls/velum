@@ -31,7 +31,7 @@ export const config = {
   // indexerWs/indexerHttp below actually point at. Was hardcoded to 'undeployed' directly in
   // index.ts's setNetworkId() call until 2026-08-29, silently wrong for any non-local network.
   networkId:       process.env.MIDNIGHT_NETWORK_ID    ?? 'undeployed',
-  // devnet.yml's indexer-standalone service (new-generation SDK devnet — see docs/environment.md)
+  // devnet.yml's indexer-standalone service (new-generation SDK devnet)
   indexerWs:       process.env.MIDNIGHT_INDEXER_WS   ?? 'ws://127.0.0.1:8088/api/v4/graphql/ws',
   indexerHttp:     process.env.MIDNIGHT_INDEXER_URL   ?? 'http://127.0.0.1:8088/api/v4/graphql',
   // The indexer app's own business-data Postgres (devnet.yml's poap-pg service — unrelated to
