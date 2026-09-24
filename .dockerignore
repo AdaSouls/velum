@@ -1,0 +1,12 @@
+**/node_modules
+.git
+logs
+scripts/logs
+dist-share
+midnight-level-db
+scripts/midnight-level-db
+**/.env
+**/.env.*
+contracts/src/managed/poap/keys
+contracts/src/managed/poap-shell
+deploy/production/zk

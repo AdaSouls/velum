@@ -1,0 +1,82 @@
+# Velum production stack — API host only (the frontend lives on Vercel, see README.md).
+#
+#   cd deploy/production
+#   cp .env.example .env   # fill it in
+#   docker compose up -d --build
+#
+# Only Caddy publishes ports (80/443). Postgres, the indexer and the IPFS proxy are reachable
+# solely over the internal compose network.
+name: velum
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: velum
+      POSTGRES_DB: velum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U velum -d velum']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    build:
+      context: ../..
+      dockerfile: deploy/production/indexer.Dockerfile
+    image: velum-indexer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:?set CONTRACT_ADDRESS in .env}
+      MIDNIGHT_NETWORK_ID: ${MIDNIGHT_NETWORK_ID:?set MIDNIGHT_NETWORK_ID in .env}
+      MIDNIGHT_INDEXER_WS: ${MIDNIGHT_INDEXER_WS:?set MIDNIGHT_INDEXER_WS in .env}
+      MIDNIGHT_INDEXER_URL: ${MIDNIGHT_INDEXER_URL:?set MIDNIGHT_INDEXER_URL in .env}
+      DATABASE_URL: postgresql://velum:${POSTGRES_PASSWORD}@postgres:5432/velum
+      PORT: '3001'
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in .env}
+
+  # Optional (profile "ipfs", enable via COMPOSE_PROFILES=ipfs in .env): the Pinata pinning proxy
+  # from poap-frontend/server. Runs straight from a checkout of that directory on this host
+  # (FRONTEND_SERVER_DIR) — it's a single dependency-light Express file, not worth its own image.
+  ipfs-proxy:
+    profiles: ['ipfs']
+    image: docker.io/library/node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ${FRONTEND_SERVER_DIR:-./ipfs-proxy-src}:/src:ro
+    command: ['sh', '-c', 'cp -r /src/. /app && npm ci --omit=dev --no-audit --no-fund && exec node index.js']
+    environment:
+      PINATA_JWT: ${PINATA_JWT:-}
+      PORT: '4000'
+      CORS_ALLOWED_ORIGIN: ${FRONTEND_ORIGIN:-}
+
+  caddy:
+    image: docker.io/library/caddy:2
+    restart: unless-stopped
+    depends_on:
+      - indexer
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./zk:/srv/zk:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,38 @@
+# Velum API host. Caddy obtains and renews the TLS certificate for {$API_DOMAIN} automatically
+# (the domain's A/AAAA record must already point at this server, and ports 80/443 must be open).
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# ZK artifacts (prover/verifier keys + zkir) for the deployed contract, fetched by the
+	# frontend's FetchZkConfigProvider as <base>/keys/<circuit>.prover etc. with
+	# base = https://{$API_DOMAIN}/zk/poap. Public data by design (the verifier keys are on-chain
+	# anyway), so a wildcard CORS origin is fine — no credentials are ever involved.
+	handle_path /zk/* {
+		header Access-Control-Allow-Origin "*"
+		header Cache-Control "public, max-age=3600"
+		root * /srv/zk
+		file_server
+	}
+
+	# IPFS pinning proxy from poap-frontend/server (holds the Pinata secret server-side).
+	handle /api/ipfs/* {
+		reverse_proxy ipfs-proxy:4000
+	}
+
+	# Everything else: the Velum indexer API (/health, /api/events, /api/tokens,
+	# /api/disclosure-requests). CORS is handled by the indexer itself (CORS_ALLOWED_ORIGINS).
+	handle {
+		reverse_proxy indexer:3001
+	}
+}
