@@ -1,6 +1,7 @@
 {
   "name": "@adasouls/poap-contract",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "compact": "compact compile +0.31.1 compact/poap.compact src/managed/poap/",

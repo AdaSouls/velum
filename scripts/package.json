@@ -2,6 +2,7 @@
   "name": "@adasouls/poap-deploy-scripts",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "deploy": "tsx deploy.ts",

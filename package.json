@@ -1,6 +1,7 @@
 {
   "name": "poap-midnight",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "contracts",
     "scripts",
