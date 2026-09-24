@@ -18,7 +18,7 @@ import { createWitnesses, type PoapPrivateState } from '../witnesses.js';
 // attributePath, 16 for setMembershipPath) is enforced by the circuit at
 // proof time via the array length, not encoded in this TS type, so one
 // alias covers both. Note goes_left (snake_case), not goesLeft.
-type MerklePathArg = {
+export type MerklePathArg = {
   leaf: Uint8Array;
   path: { sibling: { field: bigint }; goes_left: boolean }[];
 };
@@ -276,9 +276,13 @@ export class PoapSimulator {
     recipientPk: Uint8Array,
     tokenMetadataURI: string = 'ipfs://test-metadata',
     tokenPrivateMetadataCommit: Uint8Array = new Uint8Array(32),
+    credentialAttributesRoot: Uint8Array = new Uint8Array(32),
   ): Ledger {
     this.circuitContext = this.contract.impureCircuits
-      .mintTo(this.circuitContext, eventId, recipientPk, tokenMetadataURI, tokenPrivateMetadataCommit)
+      .mintTo(
+        this.circuitContext, eventId, recipientPk, tokenMetadataURI,
+        tokenPrivateMetadataCommit, credentialAttributesRoot,
+      )
       .context;
     this.savePrivateState();
     return this.getLedger();
@@ -367,6 +371,66 @@ export class PoapSimulator {
       .context;
     this.savePrivateState();
     return this.getLedger();
+  }
+
+  // ── Ownership proofs ─────────────────────────────────────────────────────
+  //
+  // All three signal success purely by not throwing (see poap.compact).
+
+  static computeCredentialLeaf(eventId: Uint8Array, holderPk: Uint8Array, credAttrRoot: Uint8Array): Uint8Array {
+    return pureCircuits.computeCredentialLeaf(eventId, holderPk, credAttrRoot);
+  }
+
+  static computeCredentialAttrLeaf(fieldId: Uint8Array, value: Uint8Array, rand: Uint8Array): Uint8Array {
+    return pureCircuits.computeCredentialAttrLeaf(fieldId, value, rand);
+  }
+
+  // The wallet-side path lookup: what a real wallet does against indexer
+  // state. Uses the ACTIVE user's holder pseudonym, so a test can only
+  // build a path for a leaf it could actually reconstruct.
+  credentialPath(tokenId: bigint, issuerId: Uint8Array, credAttrRoot: Uint8Array = new Uint8Array(32)): MerklePathArg {
+    const eventId = this.getLedger().tokenEvent.lookup(tokenId);
+    const leaf = PoapSimulator.computeCredentialLeaf(eventId, this.getHolderPk(issuerId), credAttrRoot);
+    return this.getLedger().credentials.pathForLeaf(tokenId, leaf) as MerklePathArg;
+  }
+
+  proveTokenOwnership(requestId: Uint8Array, tokenId: bigint): void {
+    const result = this.contract.impureCircuits.proveTokenOwnership(this.circuitContext, requestId, tokenId);
+    this.circuitContext = result.context;
+    this.savePrivateState();
+  }
+
+  proveEventAttendance(requestId: Uint8Array, credAttrRoot: Uint8Array, credPath: MerklePathArg): void {
+    const result = this.contract.impureCircuits.proveEventAttendance(
+      this.circuitContext, requestId, credAttrRoot, credPath,
+    );
+    this.circuitContext = result.context;
+    this.savePrivateState();
+  }
+
+  proveCredentialAttribute(
+    requestId: Uint8Array,
+    value: Uint8Array,
+    rand: Uint8Array,
+    attributePath: MerklePathArg,
+    setMembershipPath: MerklePathArg,
+    credPath: MerklePathArg,
+  ): void {
+    const result = this.contract.impureCircuits.proveCredentialAttribute(
+      this.circuitContext, requestId, value, rand, attributePath, setMembershipPath, credPath,
+    );
+    this.circuitContext = result.context;
+    this.savePrivateState();
+  }
+
+  // Public transcript of a proveEventAttendance call (state not advanced) —
+  // lets tests assert what the anonymous proof does and doesn't put on-chain.
+  proveEventAttendanceTranscript(requestId: Uint8Array, credAttrRoot: Uint8Array, credPath: MerklePathArg): string {
+    const result = this.contract.impureCircuits.proveEventAttendance(
+      this.circuitContext, requestId, credAttrRoot, credPath,
+    );
+    return JSON.stringify(result.proofData.publicTranscript, (_k, v) =>
+      typeof v === 'bigint' ? v.toString() : v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v);
   }
 
   private savePrivateState(): void {

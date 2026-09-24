@@ -114,6 +114,24 @@ export ledger usedDisclosures: Set<Bytes<32>>;
 // prover claims — see DisclosureRequest and publishDisclosureRequest.
 export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 
+// Credential commitment tree — the anonymous counterpart to tokenOwner.
+// The leaf at index tokenId is credential_leaf(eventId, holderPk,
+// credAttrRoot), written at mint time. proveEventAttendance /
+// proveCredentialAttribute prove knowledge of a live leaf via a Merkle
+// path, so the proof reveals only the tree root — not which token, which
+// holder pseudonym, or which attributes. A plain tokenId-keyed check
+// (like proveTokenOwnership) can't do that: every Map read puts its key in
+// the public transcript.
+//
+// Historic, so a path built against a slightly older root still verifies
+// after unrelated mints land in between. burn() overwrites the leaf AND
+// calls resetHistory() — without the reset, a revoked credential could
+// keep proving against any pre-revocation root forever.
+//
+// Depth 20 → at most 2^20 = 1048576 tokens (tokenId is used as the leaf
+// index; mintTokenTo asserts the bound).
+export ledger credentials: HistoricMerkleTree<20, Bytes<32>>;
+
 // Contract-level pause flag
 export ledger isPaused: Boolean;
 
@@ -173,6 +191,37 @@ circuit holder_pk(issuerId: Bytes<32>): Bytes<32> {
   return disclose(persistentHash<Vector<3, Bytes<32>>>(
            [pad(32, "adasouls:holder-pk:v1:"), local_sk(), issuerId]
            ));
+}
+
+// Same value as holder_pk, but NOT disclosed. Used only inside the
+// anonymous credential proofs, where the pseudonym must never reach the
+// public transcript — it only feeds a hidden Merkle leaf. Keeping it
+// undisclosed makes the compiler reject any accidental ledger use of it.
+circuit holder_secret_pk(issuerId: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:holder-pk:v1:"), local_sk(), issuerId]
+           );
+}
+
+// Leaf of the credentials tree. Binds a credential to its event, to the
+// holder's per-issuer pseudonym (so only the holder's sk can use it) and
+// to that holder's own private attribute root (all-zero if none — the
+// claim() case). No extra salt needed: the leaf is never revealed by a
+// proof, and a non-zero credAttrRoot is already hiding (its leaves are
+// persistentCommit openings).
+circuit credential_leaf(eventId: Bytes<32>, holderPk: Bytes<32>, credAttrRoot: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+           [pad(32, "adasouls:cred-leaf:v1:"), eventId, holderPk, credAttrRoot]
+           );
+}
+
+// Leaf of a per-credential attribute tree (the tree whose root is
+// credAttrRoot). Unlike attribute_leaf_hash, no eventId here: the binding
+// to event and holder happens one level up, in credential_leaf.
+circuit credential_attr_leaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "adasouls:cred-attr:v1:"), fieldId, persistentCommit<Bytes<32>>(value, rand)]
+           );
 }
 
 // Public-ledger key for the (holder, event) → token index. Prevents a wallet
@@ -365,7 +414,8 @@ circuit mintTokenTo(
           eventId: Bytes<32>,
           ev: EventRecord,
           tokenMetaURI: Opaque<"string">,
-          tokenPrivCommit: Bytes<32>
+          tokenPrivCommit: Bytes<32>,
+          credAttrRoot: Bytes<32>
           ): Uint<64> {
   assert(ev.isActive, "Event is not active");
   assert(ev.expiration == 0 as Uint<64> || blockTimeLt(ev.expiration),
@@ -402,6 +452,9 @@ circuit mintTokenTo(
   tokenMetadataURI.insert(tokenId, tokenMetaURI);
   tokenPrivateMetadataCommit.insert(tokenId, tokenPrivCommit);
   eventHolderToken.insert(key, tokenId);
+  // Leaf index == tokenId so burn() can overwrite exactly this leaf.
+  assert(tokenId < 1048576 as Uint<64>, "Credential tree is full");
+  credentials.insertIndex(credential_leaf(eventId, pk, credAttrRoot), tokenId);
 
   const updatedEv =
           EventRecord { maxSupply: ev.maxSupply,
@@ -432,7 +485,9 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   assert(ev.isPublicMint, "Event requires organizer to mint");
 
   const pk = holder_pk(ev.organizer);
-  const tokenId = mintTokenTo(pk, evId, ev, ev.metadataURI, ev.privateMetadataCommit);
+  // Self-service claims carry no per-holder attributes (nobody attests
+  // them) — their credential leaf just proves membership in the event.
+  const tokenId = mintTokenTo(pk, evId, ev, ev.metadataURI, ev.privateMetadataCommit, default<Bytes<32>>);
   store_token(tokenId, ev.organizer, evId, sb);
 }
 
@@ -444,22 +499,33 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
 // Callable by admin or the event's own organizer. Never touches the
 // recipient's private state — the caller proving this transaction is the
 // organizer, not the recipient.
+//
+// credentialAttributesRoot is the root of THIS recipient's private
+// attribute tree (leaves from computeCredentialAttrLeaf) — data unique to
+// this credential that the holder can later prove predicates about,
+// anonymously, via proveCredentialAttribute. The organizer must hand the
+// recipient the openings (fieldId, value, rand per leaf) off-chain. Pass
+// an all-zero Bytes<32> for a credential with no private attributes.
+// Only the resulting credential leaf is written on-chain; the root itself
+// never appears in a ledger operation.
 export circuit mintTo(
                  eventId: Bytes<32>,
                  recipientPk: Bytes<32>,
                  tokenMetadataURI: Opaque<"string">,
-                 tokenPrivateMetadataCommit: Bytes<32>
+                 tokenPrivateMetadataCommit: Bytes<32>,
+                 credentialAttributesRoot: Bytes<32>
                  ): [] {
   const evId = disclose(eventId);
   const recipient = disclose(recipientPk);
   const tokMetaURI = disclose(tokenMetadataURI);
   const tokPrivCommit = disclose(tokenPrivateMetadataCommit);
+  const credAttrRoot = disclose(credentialAttributesRoot);
   assert(!isPaused, "Contract is paused");
   assert(events.member(evId), "Event does not exist");
   const ev = events.lookup(evId);
   assert(is_admin() || ev.organizer == caller_pk(), "Not authorized to mint for this event");
 
-  mintTokenTo(recipient, evId, ev, tokMetaURI, tokPrivCommit);
+  mintTokenTo(recipient, evId, ev, tokMetaURI, tokPrivCommit, credAttrRoot);
 }
 
 // ── Token: Burn ───────────────────────────────────────────────────────────────
@@ -478,6 +544,13 @@ export circuit mintTo(
 // credential-invalidation case this circuit exists for in the first
 // place, and it should stay a real exclusion, not a temporary one the
 // holder can immediately undo by re-claiming.
+//
+// Every burn (self or revocation) also kills the token's credential leaf
+// and resets the tree's root history, so the credential can't be used in
+// proveEventAttendance / proveCredentialAttribute against any root, old
+// or new. Side effect: other holders' proofs built against a pre-burn root
+// fail and must be rebuilt from a fresh path — acceptable since burns are
+// rare compared to proofs.
 export circuit burn(tokenId: Uint<64>): [] {
   const tId = disclose(tokenId);
   assert(!isPaused, "Contract is paused");
@@ -488,6 +561,8 @@ export circuit burn(tokenId: Uint<64>): [] {
   const isOwner = ownerPk == holder_pk(issuerId);
   assert(isOwner || is_admin() || issuerId == caller_pk(), "Not authorized to burn this token");
   burnedTokens.insert(tId, true);
+  credentials.insertIndexDefault(tId);
+  credentials.resetHistory();
   if (isOwner) {
     const evId = tokenEvent.lookup(tId);
     eventHolderToken.remove(holder_event_key(ownerPk, evId));
@@ -757,4 +832,117 @@ export circuit proveAttributeMembershipOnce(
   const n = disclosure_nullifier(requestId);
   assert(!usedDisclosures.member(n), "Disclosure already redeemed for this request");
   usedDisclosures.insert(n);
+}
+
+// ── Ownership Proofs ─────────────────────────────────────────────────────────
+//
+// Two flavours, both answering a verifier's published DisclosureRequest
+// (publishDisclosureRequest) so the proof is scoped to that verifier's
+// event and fresh for that request — a proof with no request would only
+// show "someone, at some point, owned token N", which no verifier can act
+// on. For ownership-only requests fieldId/setRoot are ignored (publish
+// them as all-zero).
+//
+//   proveTokenOwnership   — PUBLIC: reveals the tokenId (and so the holder
+//                           pseudonym). The basic "caller owns a token".
+//   proveEventAttendance  — ANONYMOUS: "I own SOME live token of this
+//                           event", via the credentials tree. Reveals only
+//                           requestId, eventId and a tree root.
+//   proveCredentialAttribute — ANONYMOUS + a predicate over the holder's
+//                           OWN private attributes (set by mintTo).
+//
+// Like proveAttributeMembership, all three signal success by not throwing
+// and write nothing: a verifier checks for a successful transaction calling
+// the circuit with their requestId. That also means a holder can relay the
+// request to someone else who holds the same POAP — inherent to any
+// stateless proof; publish one request per verification session.
+
+// Pure off-chain helper (wallet tooling): the credential leaf the wallet
+// needs to look up its own Merkle path, e.g.
+// ledger.credentials.pathForLeaf(tokenId, computeCredentialLeaf(...)).
+// holderPk here is getHolderPk(issuerId) — already public in tokenOwner.
+export pure circuit computeCredentialLeaf(eventId: Bytes<32>, holderPk: Bytes<32>, credAttrRoot: Bytes<32>): Bytes<32> {
+  return credential_leaf(disclose(eventId), disclose(holderPk), disclose(credAttrRoot));
+}
+
+// Pure off-chain helper (organizer tooling): one leaf of a recipient's
+// private attribute tree, whose root goes into mintTo's
+// credentialAttributesRoot. Same rand rules as computeAttributeLeaf: never
+// reuse rand across leaves or credentials.
+export pure circuit computeCredentialAttrLeaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
+  return credential_attr_leaf(disclose(fieldId), disclose(value), disclose(rand));
+}
+
+// Proves the caller owns live token `tokenId` of the request's event.
+// Burned tokens (self-burn or issuer/admin revocation) fail.
+export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] {
+  const rid = disclose(requestId);
+  const tId = disclose(tokenId);
+  assert(disclosureRequests.member(rid), "Unknown disclosure request");
+  const req = disclosureRequests.lookup(rid);
+  assert(tokenOwner.member(tId), "Unknown token");
+  assert(!burnedTokens.member(tId), "Token burned");
+  assert(tokenEvent.lookup(tId) == req.eventId, "Token is not for the requested event");
+  assert(tokenOwner.lookup(tId) == holder_pk(tokenIssuer.lookup(tId)), "Not the owner");
+}
+
+// Proves the caller owns SOME live token of the request's event, without
+// revealing which. The anonymity set is every live credential of that
+// event — small events mean small sets. credAttrRoot is the holder's own
+// attribute root (all-zero for claim()ed tokens), kept private.
+// Build credPath against the LATEST root: the root in the transcript tells
+// an observer which tree version the proof used.
+export circuit proveEventAttendance(
+                 requestId: Bytes<32>,
+                 credAttrRoot: Bytes<32>,
+                 credPath: MerkleTreePath<20, Bytes<32>>
+                 ): [] {
+  const rid = disclose(requestId);
+  assert(disclosureRequests.member(rid), "Unknown disclosure request");
+  const req = disclosureRequests.lookup(rid);
+  assert(events.member(req.eventId), "Event does not exist");
+  const ev = events.lookup(req.eventId);
+  const leaf = credential_leaf(req.eventId, holder_secret_pk(ev.organizer), credAttrRoot);
+  assert(credPath.leaf == leaf, "Path does not match this holder's credential");
+  assert(credentials.checkRoot(disclose(merkleTreePathRoot<20, Bytes<32>>(credPath))),
+         "Credential not in tree");
+}
+
+// Proves the caller owns SOME live token of the request's event AND that
+// the private attribute req.fieldId committed in THAT credential (via
+// mintTo's credentialAttributesRoot) is a member of the set pinned at
+// req.setRoot — revealing neither the token, the holder, nor the value.
+// Same pinned-set reasoning as proveAttributeMembership. The attribute
+// root is never an input: it's recomputed from attrPath, so the only way
+// to satisfy the credential-leaf check is with openings the organizer
+// actually committed for this holder.
+export circuit proveCredentialAttribute(
+                 requestId: Bytes<32>,
+                 value: Bytes<32>,
+                 rand: Bytes<32>,
+                 attributePath: MerkleTreePath<8, Bytes<32>>,
+                 setMembershipPath: MerkleTreePath<16, Bytes<32>>,
+                 credPath: MerkleTreePath<20, Bytes<32>>
+                 ): [] {
+  const rid = disclose(requestId);
+  assert(disclosureRequests.member(rid), "Unknown disclosure request");
+  const req = disclosureRequests.lookup(rid);
+  assert(events.member(req.eventId), "Event does not exist");
+  const ev = events.lookup(req.eventId);
+
+  // 1. (value, rand) opens one of this credential's attribute leaves.
+  assert(attributePath.leaf == credential_attr_leaf(req.fieldId, value, rand),
+         "Path does not match the recomputed leaf");
+  const credAttrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field);
+
+  // 2. That attribute root belongs to a live credential of the caller.
+  const leaf = credential_leaf(req.eventId, holder_secret_pk(ev.organizer), credAttrRoot);
+  assert(credPath.leaf == leaf, "Path does not match this holder's credential");
+  assert(credentials.checkRoot(disclose(merkleTreePathRoot<20, Bytes<32>>(credPath))),
+         "Credential not in tree");
+
+  // 3. The same hidden value is in the verifier's pinned set.
+  assert(setMembershipPath.leaf == value, "Set path does not match the hidden value");
+  const computedSetRoot = upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field);
+  assert(computedSetRoot == req.setRoot, "Value is not a member of the requested set");
 }

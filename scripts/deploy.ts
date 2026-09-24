@@ -146,6 +146,9 @@ const PROOF_CIRCUIT_IDS = [
   'publishDisclosureRequest',
   'proveAttributeMembership',
   'proveAttributeMembershipOnce',
+  'proveTokenOwnership',
+  'proveEventAttendance',
+  'proveCredentialAttribute',
 ] as const;
 
 // Genesis wallet seed — the `dev` chain spec (devnet.yml's CFG_PRESET: 'dev') pre-mints NIGHT
