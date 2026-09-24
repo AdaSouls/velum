@@ -173,6 +173,14 @@ const WALLET_SYNC_TIMEOUT_MS = 10 * 60_000;
 // is no reason to burn 30 minutes here waiting on a balance that legitimately won't be positive
 // until a coin matures.
 const DUST_BALANCE_TIMEOUT_MS = 20_000;
+// ...but only once the DUST domain has actually caught up. Confirmed 2026-09-24 on preprod: the
+// balance reads 0 until the dust wallet has replayed the network's FULL dust-ledger event history
+// (~1.56M events at the time, ~240 events/s here → ~1.5-2h), and this process keeps no wallet
+// state between runs, so every run replays it from scratch. The 20s window above alone made the
+// deploy fail with Wallet.InsufficientFunds against a wallet whose 4 NIGHT UTXOs were all
+// registered and generating DUST. So: keep polling while the dust sync is still behind, up to this
+// hard ceiling (override with DUST_SYNC_TIMEOUT_MIN).
+const DUST_SYNC_TIMEOUT_MS = Number(process.env['DUST_SYNC_TIMEOUT_MIN'] ?? 180) * 60_000;
 
 // Demo event parameters (TASK-016). This is a LABEL now, not the raw
 // on-chain eventId — createEvent derives the real id as
@@ -313,7 +321,10 @@ async function main() {
     logger.info('All NIGHT UTXOs already registered for DUST generation.');
   }
 
-  logger.info(`Checking DUST balance (up to ${DUST_BALANCE_TIMEOUT_MS / 60_000}min)...`);
+  logger.info(
+    `Checking DUST balance (${DUST_BALANCE_TIMEOUT_MS / 1000}s once dust sync is complete, ` +
+      `up to ${DUST_SYNC_TIMEOUT_MS / 60_000}min while it is still catching up)...`,
+  );
   // Polled in short-lived snapshots (firstValueFrom(wallet.wallet.state()) grabs the current
   // value and completes immediately) rather than one subscription kept open for the full
   // ceiling — confirmed 2026-09-15 that holding filter()+timeout() open against wallet.state()
@@ -323,18 +334,25 @@ async function main() {
   // found), but bounding each subscription's lifetime to one snapshot sidesteps it either way.
   const DUST_POLL_INTERVAL_MS = 15_000;
   let dustBalance = 0n;
-  const dustPollDeadline = Date.now() + DUST_BALANCE_TIMEOUT_MS;
+  const dustPollStart = Date.now();
   for (;;) {
     const snapshot = await firstValueFrom(wallet.wallet.state());
     dustBalance = snapshot.dust.balance(new Date());
+    const dustSynced = snapshot.dust.progress.isStrictlyComplete();
     const rssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
-    logger.info(`  poll: dust=${dustBalance} rss=${rssMb}MB`);
-    if (dustBalance > 0n || Date.now() >= dustPollDeadline) break;
+    logger.info(
+      `  poll: dust=${dustBalance} dustSync=${snapshot.dust.progress.appliedIndex}` +
+        `${dustSynced ? ' (complete)' : ''} rss=${rssMb}MB`,
+    );
+    const elapsed = Date.now() - dustPollStart;
+    if (dustBalance > 0n) break;
+    if (dustSynced && elapsed >= DUST_BALANCE_TIMEOUT_MS) break;
+    if (elapsed >= DUST_SYNC_TIMEOUT_MS) break;
     await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
   }
   if (dustBalance === 0n) {
     logger.warn(
-      `DUST balance still 0 after ${DUST_BALANCE_TIMEOUT_MS / 60_000}min — deploy will likely fail with an insufficient-fee error. ` +
+      `DUST balance still 0 after ${Math.round((Date.now() - dustPollStart) / 60_000)}min — deploy will likely fail with an insufficient-fee error. ` +
         'Retroactive DUST accrues from each NIGHT UTXO\'s creation time at ~0.00083 DUST/sec per ' +
         'NIGHT (docs.midnight.network/concepts/dust-architecture); if this UTXO is very recently ' +
         'funded, wait longer and retry.',
