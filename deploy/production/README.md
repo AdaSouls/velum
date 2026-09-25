@@ -16,7 +16,7 @@ Caddy terminates TLS (automatic Let's Encrypt) and is the only thing listening p
 ```
 https://$API_DOMAIN/health               → indexer
 https://$API_DOMAIN/api/events|tokens|…  → indexer
-https://$API_DOMAIN/api/ipfs/*           → ipfs-proxy (optional)
+https://$API_DOMAIN/api/ipfs/*, /api/backup, /api/credential-delivery, /api/disclosure-sets → ipfs-proxy (optional)
 https://$API_DOMAIN/zk/poap/…            → static ZK artifacts
 ```
 
@@ -104,7 +104,9 @@ git clone <poap-frontend-repo-url> /opt/velum/poap-frontend
 ```
 
 Then in `.env`: uncomment `COMPOSE_PROFILES=ipfs`, set
-`FRONTEND_SERVER_DIR=/opt/velum/poap-frontend/server` and `PINATA_JWT` (upload-only scope).
+`FRONTEND_SERVER_DIR=/opt/velum/poap-frontend/server` and `PINATA_JWT`. Scope the key to Files
+(read + write, which covers uploads, private download links and deleting superseded backups) and
+Gateways (read) — never an admin key.
 
 ## 6. Start
 

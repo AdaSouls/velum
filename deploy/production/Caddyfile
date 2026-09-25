@@ -25,8 +25,11 @@
 		file_server
 	}
 
-	# IPFS pinning proxy from poap-frontend/server (holds the Pinata secret server-side).
-	handle /api/ipfs/* {
+	# IPFS pinning proxy from poap-frontend/server (holds the Pinata secret server-side). Besides
+	# /api/ipfs/* it serves the encrypted wallet backups, credential delivery and disclosure sets,
+	# all fetched by the frontend from REACT_APP_IPFS_API_URL.
+	@ipfs path /api/ipfs/* /api/backup /api/backup/* /api/credential-delivery /api/credential-delivery/* /api/disclosure-sets /api/disclosure-sets/*
+	handle @ipfs {
 		reverse_proxy ipfs-proxy:4000
 	}
 
