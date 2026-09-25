@@ -31,5 +31,5 @@ for c in $circuits; do
   cp "$SRC/keys/$c.prover" "$SRC/keys/$c.verifier" "$DEST/keys/"
   cp "$SRC/zkir/$c.bzkir" "$SRC/zkir/$c.zkir" "$DEST/zkir/"
 done
-(cd "$DEST" && find . -type f | sort | xargs sha256sum > SHA256SUMS)
+(cd "$DEST" && find . -type f ! -name SHA256SUMS | sort | xargs sha256sum > SHA256SUMS)
 echo "synced $(echo $circuits | wc -w) circuits into $DEST ($(du -sh "$DEST" | cut -f1))"
