@@ -24,7 +24,8 @@ Verified locally (podman, 2026-09-24): the image builds, migrations apply, the i
 the preprod indexer over WebSocket, CORS is applied, and Caddy serves `/health`, `/api/*` and
 `/zk/poap/*` (with `Access-Control-Allow-Origin: *`). Also verified against the live preprod
 contract (`deployments/preprod.md`): the containerized indexer follows it and `/api/events`
-returns its demo event. Not yet verified: TLS issuance on a real domain.
+returns its demo event. Live at `https://velum-api.adasouls.io` since 2026-09-25 (Let's Encrypt
+TLS issued by Caddy; only 22/80/443 reachable).
 
 ---
 

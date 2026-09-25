@@ -20,3 +20,12 @@
 | Metadata URI | `ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json` |
 | Create Tx Hash | `ff2deed1f90f23da96bd02171f0cdf849d46a232474e2a55024966a53f1a09a2` |
 | Block Height | 2685997 |
+
+## API host
+
+| Field | Value |
+|---|---|
+| API | `https://velum-api.adasouls.io` (Caddy + indexer + Postgres, `deploy/production/`) |
+| Frontend | `https://velum.adasouls.io` (Vercel, `poap-frontend` branch `feature/production`) |
+| Deployed commit | `40834d2` |
+| Live since | 2026-09-25 |
