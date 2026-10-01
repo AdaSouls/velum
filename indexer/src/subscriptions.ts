@@ -41,12 +41,20 @@ export async function startSubscription(
   client: Client,
   db: Pool,
   contractAddress: string,
+  // Injectable so tests can drive the subscription without real serialized contract state.
+  parse: (stateHex: string) => LedgerView = parseState,
 ): Promise<void> {
   const { lastBlock, lastState } = await loadCursor();
   console.log(`[sub] resuming from block ${lastBlock}`);
 
   // Restore previous ledger state for diffing (empty on first run)
-  let prevLedger: LedgerView = lastState ? parseState(lastState) : emptyLedger();
+  let prevLedger: LedgerView = lastState ? parse(lastState) : emptyLedger();
+
+  // graphql-ws calls next() for each message without waiting for the previous call's promise, so
+  // a backfill would otherwise run many handlers at once, all diffing against the same prevLedger
+  // (and saving the cursor in whatever order they finished). Chaining them keeps one action at a
+  // time, in arrival order, each diffed against the state the previous one left.
+  let queue: Promise<void> = Promise.resolve();
 
   // BlockOffset.height is Int in the indexer-standalone v4 schema, not String —
   // sending a string here fails GraphQL variable coercion on resubscribe after a
@@ -65,19 +73,25 @@ export async function startSubscription(
           if (!data?.contractActions) return;
 
           const event = data.contractActions;
-          try {
-            await handleEvent(db, event, prevLedger, (newPrev) => { prevLedger = newPrev; });
-          } catch (err) {
-            console.error('[sub] error handling event:', err);
-          }
+          queue = queue.then(async () => {
+            try {
+              await handleEvent(db, event, prevLedger, (newPrev) => { prevLedger = newPrev; }, parse);
+            } catch (err) {
+              console.error('[sub] error handling event:', err);
+            }
+          });
+          await queue;
         },
         error: (err) => {
           console.error('[sub] fatal subscription error:', err);
           reject(err);
         },
         complete: () => {
-          console.log('[sub] subscription completed');
-          resolve();
+          // Let the actions already received finish before reporting completion.
+          queue.then(() => {
+            console.log('[sub] subscription completed');
+            resolve();
+          });
         },
       },
     );
@@ -91,9 +105,10 @@ async function handleEvent(
   event: ContractEvent,
   prevLedger: LedgerView,
   setPrev: (l: LedgerView) => void,
+  parse: (stateHex: string) => LedgerView,
 ): Promise<void> {
   const stateHex = event.state;
-  const currLedger = parseState(stateHex);
+  const currLedger = parse(stateHex);
   const operation = (event as ContractCall).entryPoint ?? (event.__typename === 'ContractUpdate' ? 'update' : 'deploy');
   const tx = event.transaction;
   const meta: TxMeta = { txHash: tx.hash, blockHeight: BigInt(tx.block.height) };

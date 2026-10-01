@@ -24,11 +24,12 @@ import pg from 'pg';
 import express from 'express';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as nodePath from 'node:path';
 
 import { applyStateDiff } from './poap-state.js';
+import { startSubscription } from './subscriptions.js';
 import type { LedgerView, EventRecord, IssuerRecord } from './parser.js';
 import { eventsRouter } from './api/routes/events.js';
 import { tokensRouter } from './api/routes/tokens.js';
@@ -119,6 +120,15 @@ function withToken(
   };
 }
 
+function withEventActive(base: LedgerView, eventId: Uint8Array, isActive: boolean): LedgerView {
+  return {
+    ...base,
+    events: (base.events as Array<[Uint8Array, EventRecord]>).map(([id, ev]) =>
+      Buffer.from(id).equals(Buffer.from(eventId)) ? [id, { ...ev, isActive }] : [id, ev],
+    ),
+  };
+}
+
 function withBurn(base: LedgerView, tokenId: bigint): LedgerView {
   return {
     ...base,
@@ -145,10 +155,12 @@ let server: ReturnType<typeof createServer>;
 
 const DB_URL = process.env.DATABASE_URL ?? 'postgresql://poap:poap@localhost:5434/poap_indexer';
 
+// Every migration, in the order db.ts's runMigrations applies them.
 const MIGRATION_SQL = (() => {
   const __dirname = nodePath.dirname(fileURLToPath(import.meta.url));
-  const p = nodePath.resolve(__dirname, '../db/migrations/001_init.sql');
-  return readFileSync(p, 'utf8');
+  const dir = nodePath.resolve(__dirname, '../db/migrations');
+  return readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+    .map((f) => readFileSync(nodePath.join(dir, f), 'utf8'));
 })();
 
 beforeAll(async () => {
@@ -166,7 +178,7 @@ beforeAll(async () => {
   }
 
   // Apply migrations (idempotent CREATE TABLE IF NOT EXISTS)
-  await pool.query(MIGRATION_SQL);
+  for (const sql of MIGRATION_SQL) await pool.query(sql);
 
   // Start test Express server on a random port
   const app = express();
@@ -533,6 +545,163 @@ describe('POAP indexer — component integration', () => {
     if (!pool) return;
     const res = await fetch(`${apiBase}/api/tokens/9999`);
     expect(res.status).toBe(404);
+  });
+
+  // ── Regressions ──────────────────────────────────────────────────────────────
+
+  it('reactivateEvent → event is active again and its deactivation is cleared', async () => {
+    if (!pool) return;
+
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, { txHash: '0xaaaa0001', blockHeight: 1n });
+
+    const afterDeactivate = withEventActive(afterCreate, EVENT_A, false);
+    await applyStateDiff(pool, 'deactivateEvent', afterCreate, afterDeactivate, { txHash: '0xeeee0005', blockHeight: 4n });
+
+    const afterReactivate = withEventActive(afterDeactivate, EVENT_A, true);
+    await applyStateDiff(pool, 'reactivateEvent', afterDeactivate, afterReactivate, { txHash: '0xeeee0006', blockHeight: 5n });
+
+    const body = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}`)).json() as any;
+    expect(body.isActive).toBe(true);
+    expect(body.deactivatedBlock).toBeNull();
+  });
+
+  it('deactivateIssuer on an unregistered organizer that already has an event → issuer marked inactive', async () => {
+    if (!pool) return;
+
+    // ADMIN_PK organizes an event without being registered: the ledger has no issuers entry,
+    // but the indexer creates an issuers row for the event's foreign key.
+    const empty = emptyLedger();
+    const afterCreate: LedgerView = { ...withEvent(empty, EVENT_A, ADMIN_PK, 100n), issuers: [] };
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, { txHash: '0xaaaa0001', blockHeight: 1n });
+
+    // Blocking a key with no ledger entry adds one with isActive=false.
+    const afterBlock: LedgerView = {
+      ...afterCreate,
+      issuers: [[ADMIN_PK, { organizerPk: ADMIN_PK, isActive: false }]],
+    };
+    await applyStateDiff(pool, 'deactivateIssuer', afterCreate, afterBlock, { txHash: '0xbbbb0002', blockHeight: 2n });
+
+    const { rows } = await pool.query(
+      'SELECT is_active, registered_block, deactivated_block, deactivated_tx FROM issuers WHERE issuer_pk = $1',
+      [hex(ADMIN_PK)],
+    );
+    expect(rows[0].is_active).toBe(false);
+    expect(rows[0].registered_block).toBeNull();
+    expect(Number(rows[0].deactivated_block)).toBe(2);
+    expect(rows[0].deactivated_tx).toBe('0xbbbb0002');
+  });
+
+  it('registerIssuer on an organizer that already has an event → registration is recorded', async () => {
+    if (!pool) return;
+
+    const empty = emptyLedger();
+    const afterCreate: LedgerView = { ...withEvent(empty, EVENT_A, ADMIN_PK, 100n), issuers: [] };
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, { txHash: '0xaaaa0001', blockHeight: 1n });
+
+    const afterRegister = withIssuer(afterCreate, ADMIN_PK);
+    await applyStateDiff(pool, 'registerIssuer', afterCreate, afterRegister, { txHash: '0xbbbb0003', blockHeight: 3n });
+
+    const { rows } = await pool.query(
+      'SELECT is_active, registered_block FROM issuers WHERE issuer_pk = $1',
+      [hex(ADMIN_PK)],
+    );
+    expect(rows[0].is_active).toBe(true);
+    expect(Number(rows[0].registered_block)).toBe(3);
+  });
+
+  it('an event with the largest Uint<64> maxSupply/expiration is stored, and later actions keep working', async () => {
+    if (!pool) return;
+
+    const U64_MAX = 2n ** 64n - 1n;
+    const empty = emptyLedger();
+    const afterHuge: LedgerView = {
+      ...withEvent(empty, EVENT_A, ADMIN_PK, U64_MAX),
+      events: [[EVENT_A, {
+        maxSupply: U64_MAX, minted: 0n, expiration: U64_MAX, organizer: ADMIN_PK,
+        isActive: true, isPublicMint: true, metadataURI: 'ipfs://test-metadata',
+        privateAttributesRoot: new Uint8Array(32),
+      }]],
+    };
+    await applyStateDiff(pool, 'createEvent', empty, afterHuge, { txHash: '0xaaaa0001', blockHeight: 1n });
+
+    const { rows } = await pool.query(
+      'SELECT max_supply::text, expiration::text FROM events WHERE event_id = $1',
+      [hex(EVENT_A)],
+    );
+    expect(rows[0].max_supply).toBe(U64_MAX.toString());
+    expect(rows[0].expiration).toBe(U64_MAX.toString());
+
+    // The indexer is not stalled: an unrelated action afterwards is still applied.
+    const afterSecond = withEvent(afterHuge, EVENT_B, ADMIN_PK, 5n);
+    await applyStateDiff(pool, 'createEvent', afterHuge, afterSecond, { txHash: '0xaaaa0002', blockHeight: 2n });
+
+    const res = await fetch(`${apiBase}/api/events`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toHaveLength(2);
+  });
+
+  it('replaying the history over existing rows repairs a stale minted counter', async () => {
+    if (!pool) return;
+
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    const afterClaim  = withToken(afterCreate, 0n, USER1_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, { txHash: '0xaaaa0001', blockHeight: 1n });
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim, { txHash: '0xcccc0003', blockHeight: 2n });
+
+    // What the old out-of-order backfill left behind on preprod.
+    await pool.query('UPDATE events SET minted = 0 WHERE event_id = $1', [hex(EVENT_A)]);
+
+    // Replay from an empty previous state, as after clearing the cursor.
+    await applyStateDiff(pool, 'createEvent', empty, afterCreate, { txHash: '0xaaaa0001', blockHeight: 1n });
+    await applyStateDiff(pool, 'claim', afterCreate, afterClaim, { txHash: '0xcccc0003', blockHeight: 2n });
+
+    const body = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}`)).json() as any;
+    expect(body.minted).toBe(1);
+    expect(body.createdBlock).toBe(1);
+  });
+
+  it('actions delivered in a burst are applied strictly in order', async () => {
+    if (!pool) return;
+
+    // Three actions, each carrying the full state after it, as the Midnight indexer sends them.
+    const empty       = emptyLedger();
+    const afterCreate = withEvent(empty, EVENT_A, ADMIN_PK, 100n);
+    const afterClaim1 = withToken(afterCreate, 0n, USER1_PK, ADMIN_PK, EVENT_A);
+    const afterClaim2 = withToken(afterClaim1, 1n, USER2_PK, ADMIN_PK, EVENT_A);
+    const states: Record<string, LedgerView> = { s1: afterCreate, s2: afterClaim1, s3: afterClaim2 };
+
+    const action = (state: string, height: number, entryPoint: string) => ({
+      data: {
+        contractActions: {
+          __typename: 'ContractCall', state, entryPoint,
+          transaction: { hash: `0xtx${height}`, block: { height } },
+        },
+      },
+    });
+
+    // Emits everything synchronously, the way a backfill arrives, then completes.
+    const burstClient = {
+      subscribe(_payload: unknown, sink: any) {
+        sink.next(action('s1', 10, 'createEvent'));
+        sink.next(action('s2', 11, 'claim'));
+        sink.next(action('s3', 12, 'claim'));
+        sink.complete();
+        return () => {};
+      },
+    };
+
+    await startSubscription(burstClient as any, pool, 'test-address', (hexState) => states[hexState]);
+
+    const body = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}`)).json() as any;
+    expect(body.minted).toBe(2);
+    expect(body.liveTokens).toBe(2);
+
+    const { rows } = await pool.query('SELECT last_block, last_state FROM indexer_cursor WHERE id = 1');
+    expect(Number(rows[0].last_block)).toBe(12);
+    expect(rows[0].last_state).toBe('s3');
   });
 });
 
