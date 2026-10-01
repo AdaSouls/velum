@@ -188,6 +188,12 @@ const WALLET_STATE_SAVE_INTERVAL_MS = 5 * 60_000;
 
 type SavedWalletState = { v: 1; shielded: string; unshielded: string; dust: string };
 
+// testkit's default overhead is 0, which leaves a transaction whose computed fee is 0 with no DUST
+// spend at all — the node rejects that as NotNormalized ("1010: Invalid Transaction: Custom
+// error: 117"). Seen on preprod 2026-10-01 on a maintenance remove-verifier-key transaction.
+// A small fixed overhead (0.3 DUST, the value the official templates use) always pays something.
+const DUST_OPTIONS = { ...DEFAULT_DUST_OPTIONS, additionalFeeOverhead: 300_000_000_000_000n };
+
 // One file per network and seed; the name carries a hash of the seed, never the seed itself.
 function walletStatePath(envConfig: EnvironmentConfiguration, seedHex: string): string {
   const seedId = createHash('sha256').update(seedHex).digest('hex').slice(0, 16);
@@ -215,8 +221,8 @@ async function saveWalletState(logger: Logger, wallet: MidnightWalletProvider, f
   }
 }
 
-// Same wallet MidnightWalletProvider.build creates (testkit's FluentWalletBuilder/WalletFactory),
-// but each sub-wallet restored from its saved state instead of started from scratch.
+// Same wallet buildWallet's fresh path creates (testkit's FluentWalletBuilder/WalletFactory), but
+// each sub-wallet restored from its saved state instead of started from scratch.
 async function restoreWallet(
   logger: Logger,
   envConfig: EnvironmentConfiguration,
@@ -230,9 +236,9 @@ async function restoreWallet(
   const dustConfig = {
     ...config,
     costParameters: {
-      ledgerParams: DEFAULT_DUST_OPTIONS.ledgerParams,
-      additionalFeeOverhead: DEFAULT_DUST_OPTIONS.additionalFeeOverhead,
-      feeBlocksMargin: DEFAULT_DUST_OPTIONS.feeBlocksMargin,
+      ledgerParams: DUST_OPTIONS.ledgerParams,
+      additionalFeeOverhead: DUST_OPTIONS.additionalFeeOverhead,
+      feeBlocksMargin: DUST_OPTIONS.feeBlocksMargin,
     },
   };
   const facade = await WalletFacade.init({
@@ -272,7 +278,19 @@ async function buildWallet(
       logger.warn(`Couldn't restore ${stateFile} (${(err as Error).message}) — doing a full sync instead.`);
     }
   }
-  return MidnightWalletProvider.build(logger, envConfig, seedHex);
+  // Not MidnightWalletProvider.build: it takes no dust options, and it logs the seed.
+  const { wallet, seeds, keystore } = await FluentWalletBuilder.forEnvironment(envConfig)
+    .withSeed(seedHex)
+    .withDustOptions(DUST_OPTIONS)
+    .buildWithoutStarting();
+  return MidnightWalletProvider.withWallet(
+    logger,
+    envConfig,
+    wallet,
+    ZswapSecretKeys.fromSeed(seeds.shielded),
+    DustSecretKey.fromSeed(seeds.dust),
+    keystore,
+  );
 }
 
 export async function startFundedWallet(

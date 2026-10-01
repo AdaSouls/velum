@@ -29,3 +29,9 @@
 | Frontend | `https://velum.adasouls.io` (Vercel, `poap-frontend` branch `feature/production`) |
 | Deployed commit | `40834d2` |
 | Live since | 2026-09-25 |
+
+## Upgrades (same address)
+
+| Date | Circuits swapped | Blocks | Commit |
+|---|---|---|---|
+| 2026-10-01 | `deactivateIssuer`, `createEvent`, `reactivateEvent`, `claim`, `mintTo` | 2786573–2786609 | `d11d114` + fee overhead fix |
