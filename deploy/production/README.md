@@ -131,7 +131,17 @@ cd /opt/velum/poap-midnight && git pull
 cd deploy/production && docker compose up -d --build
 ```
 
-**New contract deployment** (new address — e.g. after a contract change):
+**Contract upgrade** (same address — circuit logic changed, `ledger` declarations and circuit
+signatures unchanged, i.e. no diff in `contracts/src/managed/poap/contract/index.d.ts`):
+
+1. From the dev machine, with a full ZK build and the seed that deployed the contract:
+   `CONTRACT_ADDRESS=<addr> npx tsx scripts/upgrade.ts` prints which circuits differ; add
+   `--apply` to swap their verifier keys (see the script's header for what can't be upgraded).
+2. Right after: `git pull` here and `docker compose up -d --build`, re-run `sync-zk.sh` + `rsync`
+   (step 4), and redeploy the frontend with the new compiled contract and keys. No DB reset and
+   no `CONTRACT_ADDRESS` change. Swapped circuits fail for clients until they have the new build.
+
+**New contract deployment** (new address — e.g. after a ledger layout change):
 
 1. Deploy with `scripts/deploy.ts` from the dev machine.
 2. `git pull` here (matching compiled contract), update `CONTRACT_ADDRESS` in `.env`.
