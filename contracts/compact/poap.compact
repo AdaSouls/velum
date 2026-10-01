@@ -278,7 +278,10 @@ export circuit unpause(): [] {
 // ── Issuer Management ─────────────────────────────────────────────────────────
 // Anyone can create events (see createEvent) — registration here is NOT a
 // gate. It's an optional "verified organizer" signal an admin can curate;
-// the frontend may choose to show a checkmark for registered issuers.
+// the frontend may choose to show a checkmark for registered, active issuers.
+// The same map doubles as the moderation blocklist: an entry with
+// isActive == false is a blocked issuer (see deactivateIssuer), whether or
+// not it was ever registered.
 
 // Register an issuer by their Midnight public key. Admin-only.
 export circuit registerIssuer(issuerPk: Bytes<32>): [] {
@@ -290,24 +293,28 @@ export circuit registerIssuer(issuerPk: Bytes<32>): [] {
   issuers.insert(pk, issuer);
 }
 
-// Deactivate an issuer. Admin-only.
+// Deactivate (block) an issuer. Admin-only. Works on ANY key, registered or
+// not: an unknown key gets an inactive entry, which is what blocks it —
+// otherwise the permissionless issuers this is meant to stop could never be
+// blocked. A blocked issuer can't create events (createEvent) and no new
+// tokens can be minted under their existing events (mintTokenTo). There is
+// no unblock; a blocked key also can't be (re-)registered.
 export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
   const pk = disclose(issuerPk);
   assert(!isPaused, "Contract is paused");
   assert(is_admin(), "Only admin can deactivate issuers");
-  assert(issuers.member(pk), "Issuer does not exist");
-  const existing = issuers.lookup(pk);
-  const updated = IssuerRecord { organizerPk: existing.organizerPk, isActive: false };
+  const updated = IssuerRecord { organizerPk: pk, isActive: false };
   issuers.insert(pk, updated);
 }
 
 // ── Event Management ──────────────────────────────────────────────────────────
 
-// Create an event. Permissionless: callable by anyone. The caller's own
-// public key becomes the issuerId for this event — no registration or
-// admin approval required. Admin retains a global moderation override via
-// deactivateEvent/pause; the issuer registry above is opt-in metadata, not
-// a gate.
+// Create an event. Permissionless: callable by anyone the admin hasn't
+// blocked. The caller's own public key becomes the issuerId for this event —
+// no registration or admin approval required. Admin retains moderation
+// overrides via deactivateEvent (sticky — see reactivateEvent),
+// deactivateIssuer and pause; the issuer registry above is opt-in metadata,
+// not a gate.
 //
 // `label` replaces what used to be a caller-chosen eventId directly — the
 // actual on-chain eventId is derived as event_key(caller_pk(), label) and
@@ -343,6 +350,9 @@ export circuit createEvent(
   const privCommit = disclose(privateMetadataCommit);
   const attrRoot = disclose(privateAttributesRoot);
   const issuerId = caller_pk();
+  assert(!issuers.member(issuerId) || issuers.lookup(issuerId).isActive,
+         "Issuer is deactivated"
+         );
   const evId = event_key(issuerId, lbl);
   assert(!events.member(evId), "Event already exists");
 
@@ -378,16 +388,17 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
   events.insert(evId, updated);
 }
 
-// Reactivate a previously-deactivated event. Admin or the event's own
-// organizer — same authority as deactivateEvent. Without this, a mistaken
-// or malicious deactivation was permanent; every other field is carried
-// forward unchanged.
+// Reactivate a previously-deactivated event. Admin-only — narrower than
+// deactivateEvent on purpose: if the organizer could reactivate, an admin
+// takedown of an illegal or abusive event could be undone by the very
+// organizer it targets. An organizer who deactivated their own event by
+// mistake asks the admin. Every other field is carried forward unchanged.
 export circuit reactivateEvent(eventId: Bytes<32>): [] {
   const evId = disclose(eventId);
   assert(!isPaused, "Contract is paused");
   assert(events.member(evId), "Event does not exist");
   const ev = events.lookup(evId);
-  assert(is_admin() || ev.organizer == caller_pk(), "Not authorized");
+  assert(is_admin(), "Only admin can reactivate events");
   const updated = EventRecord { maxSupply: ev.maxSupply,
                                 minted: ev.minted,
                                 expiration: ev.expiration,
@@ -431,11 +442,10 @@ circuit mintTokenTo(
   assert(ev.maxSupply == 0 as Uint<64> || ev.minted < ev.maxSupply,
          "Event has reached maximum supply"
          );
-  // An issuer who opted into the registry (registerIssuer) and was later
-  // deactivated (deactivateIssuer) can no longer have new tokens minted
-  // under their events — self-service claim or organizer push-mint alike.
-  // Issuers who never registered are unaffected (registration remains
-  // opt-in metadata, not a gate — see the Issuer Management section).
+  // A deactivated (blocked) issuer — registered or not, see deactivateIssuer
+  // — can no longer have new tokens minted under their events, self-service
+  // claim or organizer push-mint alike. Issuers with no entry are unaffected
+  // (registration remains opt-in metadata, not a gate).
   assert(!issuers.member(ev.organizer) || issuers.lookup(ev.organizer).isActive,
          "Issuer is deactivated"
          );

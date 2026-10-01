@@ -95,7 +95,7 @@ describe('POAP contract — createEvent', () => {
     expect(sim.getLedger().events.lookup(eventAAsUser1).maxSupply).toBe(50n);
   });
 
-  it('a deactivated issuer can still create events — the registry is a badge, not a gate', () => {
+  it('a deactivated issuer can no longer create events', () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
 
@@ -104,7 +104,96 @@ describe('POAP contract — createEvent', () => {
     expect(sim.getLedger().issuers.lookup(issuer1Pk).isActive).toBe(false);
 
     sim.asUser(ISSUER1_SK);
-    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).not.toThrow();
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+  });
+});
+
+// ── Moderation ────────────────────────────────────────────────────────────────
+
+describe('POAP contract — moderation', () => {
+  it('an organizer cannot reactivate an event the admin took down', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(ADMIN_SK).deactivateEvent(eventA);
+
+    sim.asUser(ISSUER1_SK);
+    expect(() => sim.reactivateEvent(eventA)).toThrow();
+    expect(sim.getLedger().events.lookup(eventA).isActive).toBe(false);
+  });
+
+  it('an organizer cannot reactivate even their own deactivation — only the admin can', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.deactivateEvent(eventA);
+    expect(() => sim.reactivateEvent(eventA)).toThrow();
+
+    sim.asUser(ADMIN_SK).reactivateEvent(eventA);
+    expect(sim.getLedger().events.lookup(eventA).isActive).toBe(true);
+  });
+
+  it('admin can block an issuer that never registered', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    expect(sim.getLedger().issuers.member(issuer1Pk)).toBe(false);
+
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+    const record = sim.getLedger().issuers.lookup(issuer1Pk);
+    expect(record.isActive).toBe(false);
+    expect(record.organizerPk).toEqual(issuer1Pk);
+  });
+
+  it('a blocked unregistered issuer cannot create events', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+
+    sim.asUser(ISSUER1_SK);
+    expect(() => sim.createEvent(EVENT_A, 100n, 0n, true)).toThrow();
+  });
+
+  it('no new tokens can be minted under a blocked unregistered issuer\'s existing events', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const publicEvent = sim.createEvent(EVENT_A, 100n, 0n, true);
+    const pushEvent = sim.createEvent(EVENT_B, 100n, 0n, false);
+    sim.asUser(USER1_SK).claim(publicEvent, false);
+
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+
+    // self-service claim
+    sim.asUser(USER2_SK);
+    expect(() => sim.claim(publicEvent, false)).toThrow();
+    // organizer push-mint
+    const user2Pk = sim.getHolderPk(issuer1Pk);
+    sim.asUser(ISSUER1_SK);
+    expect(() => sim.mintTo(pushEvent, user2Pk)).toThrow();
+  });
+
+  it('other issuers are unaffected when one is blocked', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+
+    const eventA = sim.asUser(ISSUER2_SK).createEvent(EVENT_A, 100n, 0n, true);
+    sim.asUser(USER1_SK);
+    expect(() => sim.claim(eventA, false)).not.toThrow();
+  });
+
+  it('a blocked key cannot be registered afterwards', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    sim.asUser(ADMIN_SK).deactivateIssuer(issuer1Pk);
+
+    expect(() => sim.registerIssuer(issuer1Pk)).toThrow();
+  });
+
+  it('only the admin can block an issuer', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+
+    sim.asUser(USER1_SK);
+    expect(() => sim.deactivateIssuer(issuer1Pk)).toThrow();
+    expect(sim.getLedger().issuers.member(issuer1Pk)).toBe(false);
   });
 });
 
