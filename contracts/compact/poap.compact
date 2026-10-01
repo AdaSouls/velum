@@ -1,3 +1,32 @@
+// AdaSouls Velum — credential (POAP) contract for Midnight.
+//
+// Toolchain: language_version >= 0.23 (pragma below). Built and deployed with
+// compactc 0.31.1 (language 0.23.0, compact-runtime 0.16.0) — the version
+// pinned in contracts/package.json's `compact` script. Compact changes fast:
+// recompiling with another compiler version can change every circuit's keys.
+//
+// ── Documentation convention ──────────────────────────────────────────────────
+// Compact has no NatSpec-style standard, so this file uses its own tags. They
+// sit directly above the element they describe, after any free-form rationale.
+//
+//   @ledger     What the field stores and which circuits write it. Every
+//               `export ledger` field is PUBLIC: readable by anyone on-chain.
+//   @witness    What private data the client supplies.
+//   @source     Where the client gets it (private state, user input).
+//   @trust      What a malicious witness implementation could do. Witnesses
+//               run in the caller's own TypeScript, so they are NOT trusted.
+//   @circuit    What the circuit does and who is meant to call it.
+//   @param      One per argument. Arguments are prover-chosen private inputs
+//               until disclosed or constrained against ledger state.
+//   @returns    Return value, if any.
+//   @auth       How the caller is authorized (there is no msg.sender).
+//   @asserts    What must hold, i.e. what makes the transaction fail.
+//   @writes     Ledger fields modified ("none" for a pure check).
+//   @discloses  Every value that becomes public, and why that is acceptable.
+//   @private    What stays inside the proof and never reaches the chain.
+//
+// Longer explanations live in docs/smart-contracts/.
+
 pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
@@ -48,54 +77,77 @@ export struct DisclosureRequest {
 }
 
 // ── Public Ledger ─────────────────────────────────────────────────────────────
+// Everything in this section is PUBLIC, visible on-chain to anyone. Nothing
+// secret may ever be stored here in the clear — only identifiers, hashes and
+// commitments. See docs/smart-contracts/data-privacy.md for the full map.
 
+// @ledger Number of tokens ever minted; also the next tokenId. Never
+//         decremented (burns don't reduce it). Written by: claim, mintTo.
 export ledger totalSupply: Counter;
 
 // tokenId → owner public key (a per-issuer holder pseudonym — see holder_pk)
+// @ledger Set once at mint and never changed (there is no transfer circuit).
+//         Written by: claim, mintTo.
 export ledger tokenOwner: Map<Uint<64>, Bytes<32>>;
 
 // tokenId → the event this token was minted for. A token maps to exactly one
 // event — every claim mints a brand-new token, there is no "update an
 // existing token across events" path anymore (see claim()).
+// @ledger Written by: claim, mintTo.
 export ledger tokenEvent: Map<Uint<64>, Bytes<32>>;
 
 // tokenId → issuerId (organizer pk) that this token belongs to
+// @ledger Written by: claim, mintTo.
 export ledger tokenIssuer: Map<Uint<64>, Bytes<32>>;
 
 // URI to off-chain JSON for this specific token. Defaults to the event's own
 // metadataURI at mint time (claim()), or can be set independently per
 // recipient by the organizer (mintTo()).
+// @ledger The URI and whatever it points to are public. Written by: claim,
+//         mintTo.
 export ledger tokenMetadataURI: Map<Uint<64>, Opaque<"string">>;
 
 // Commitment to a per-token private-fields digest — same commit/reveal
 // mechanism as the event-level one, but for something specific to this one
 // holder (e.g. a hidden edition number, a prize tier revealed at a draw).
 // All-zero Bytes<32> means "no private part".
+// @ledger Only the commitment is public; the committed value stays hidden
+//         until revealPrivateTokenMetadata. Written by: claim, mintTo.
 export ledger tokenPrivateMetadataCommit: Map<Uint<64>, Bytes<32>>;
 
 // tokenId → revealed private-metadata digest, once someone has proven it
 // matches tokenPrivateMetadataCommit. Public once revealed, same reasoning
 // as eventRevealedMetadata below.
+// @ledger Written by: revealPrivateTokenMetadata.
 export ledger tokenRevealedMetadata: Map<Uint<64>, Bytes<32>>;
 
 // holder_event_key(ownerPk, eventId) → tokenId. Public index preventing the
 // same wallet from claiming the same event twice (self-service or
 // push-minted) — does NOT limit a wallet to one token per issuer anymore.
+// @ledger The key is a hash of two public values, so anyone can recompute it.
+//         Written by: claim, mintTo (insert), burn (remove, self-burn only).
 export ledger eventHolderToken: Map<Bytes<32>, Uint<64>>;
 
 // eventId → event metadata
+// @ledger Every EventRecord field is public, including the organizer's key
+//         and the two commitments. Written by: createEvent, deactivateEvent,
+//         reactivateEvent, claim, mintTo (minted counter).
 export ledger events: Map<Bytes<32>, EventRecord>;
 
 // eventId → revealed private-metadata digest, once someone has proven it
 // matches the event's privateMetadataCommit. Public once revealed by
 // design — the point of commit-reveal is that content becomes public data
 // at reveal time; only the *timing* of disclosure was ever private.
+// @ledger Written by: revealPrivateMetadata.
 export ledger eventRevealedMetadata: Map<Bytes<32>, Bytes<32>>;
 
 // issuerId (organizer pk) → issuer metadata
+// @ledger Verified-issuer registry and blocklist in one (isActive == false
+//         means blocked). Written by: registerIssuer, deactivateIssuer.
 export ledger issuers: Map<Bytes<32>, IssuerRecord>;
 
 // tokenId → burned flag (true = burned)
+// @ledger Entries are only ever added. Written by: burn.
 export ledger burnedTokens: Map<Uint<64>, Boolean>;
 
 // Nullifiers spent by proveAttributeMembershipOnce — guards single-use
@@ -106,12 +158,17 @@ export ledger burnedTokens: Map<Uint<64>, Boolean>;
 // only use the Once variant when a disclosure must provably happen at
 // most once. A Set, not a Map<_,Boolean>: membership is all that's ever
 // checked, so there's no second dimension worth paying ledger bytes for.
+// @ledger Each entry is a hash of (secret key, requestId): public, but not
+//         linkable to a wallet or to that wallet's other nullifiers.
+//         Written by: proveAttributeMembershipOnce.
 export ledger usedDisclosures: Set<Bytes<32>>;
 
 // requestId → the pinned question a verifier published. Reading this via
 // lookup() is what makes eventId/fieldId/setRoot actually public and
 // checkable in proveAttributeMembership, instead of trusting whatever the
 // prover claims — see DisclosureRequest and publishDisclosureRequest.
+// @ledger Immutable once published; the verifier's key is public too.
+//         Written by: publishDisclosureRequest.
 export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 
 // Credential commitment tree — the anonymous counterpart to tokenOwner.
@@ -130,24 +187,47 @@ export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 //
 // Depth 20 → at most 2^20 = 1048576 tokens (tokenId is used as the leaf
 // index; mintTokenTo asserts the bound).
+// @ledger Leaf hashes and the root history are public; what stays private is
+//         WHICH leaf an anonymous proof was about. Written by: claim, mintTo
+//         (insert leaf), burn (clear leaf, reset root history).
 export ledger credentials: HistoricMerkleTree<20, Bytes<32>>;
 
 // Contract-level pause flag
+// @ledger Written by: constructor, pause, unpause.
 export ledger isPaused: Boolean;
 
 // Admin public key — set once at deployment. sealed: the compiler rejects
 // any write to this ledger field outside the constructor, converting the
 // contract's most security-critical invariant (admin identity never
 // changes) from a review obligation into a compile-time guarantee.
+// @ledger derive_pk of the deployer's secret key. Written by: constructor.
 export sealed ledger adminPk: Bytes<32>;
 
+// @circuit   Runs once, at deployment. Makes the deployer the admin.
+// @writes    adminPk, isPaused.
+// @discloses derive_pk(local_sk()) — the admin's public key, public by
+//            design. The secret key itself never leaves the proof.
 constructor() {
   adminPk = disclose(derive_pk(local_sk()));
   isPaused = false;
 }
 
 // ── Witnesses ─────────────────────────────────────────────────────────────────
+// Witnesses are implemented by the CLIENT (contracts/src/witnesses.ts here,
+// src/midnight/witnesses.ts in the frontend). The contract can't see how they
+// are implemented, so nothing a witness returns is trusted until an assert
+// ties it to ledger state.
 
+// @witness The caller's 32-byte secret key for this contract. Every identity
+//          in the contract (admin, issuer/organizer, verifier, holder
+//          pseudonyms, nullifiers) is a domain-separated hash of it.
+// @source  The client's private state (a random key generated once per
+//          wallet in the frontend; derived from the wallet seed in scripts/).
+// @trust   The caller may return ANY key. That only lets them act as the
+//          identity that key hashes to, so authorization comes down to
+//          knowing the secret — but it also means one person can use many
+//          keys (many unlinkable pseudonyms). See the maxSupply note in
+//          mintTokenTo and the organizer check in claim.
 witness local_sk(): Bytes<32>;
 
 // Persists a newly-claimed token to client-side state, keyed by event.
@@ -160,6 +240,11 @@ witness local_sk(): Bytes<32>;
 // (e.g. UI treatment), not as an enforced guarantee. A malicious witness
 // implementation could record the wrong value for its own private
 // state — that only misleads the wallet that did it, not anyone else.
+// @witness Side-effect only: lets the client save the token it just claimed.
+//          Returns nothing, so it can't influence the circuit.
+// @source  Writes to the client's private state (the `tokens` cache).
+// @trust   None needed: a wrong or missing implementation only corrupts
+//          the caller's own local cache. Called by: claim.
 witness store_token(
           tokenId: Uint<64>,
           issuerId: Bytes<32>,
@@ -259,17 +344,37 @@ circuit event_key(organizer: Bytes<32>, label: Bytes<32>): Bytes<32> {
 // so a frontend can show/link the id immediately, or so tests can locate
 // the event afterward). organizer is not secret — it's derive_pk(sk),
 // already public everywhere else in this contract.
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     organizer  The organizer's public key (getCallerPk).
+// @param     label      The label that will be passed to createEvent.
+// @returns   The eventId createEvent will assign.
+// @writes    none.
+// @discloses organizer, label — both already public inputs; the disclose()
+//            calls only let the result leave the circuit.
 export circuit computeEventId(organizer: Bytes<32>, label: Bytes<32>): Bytes<32> {
   return event_key(disclose(organizer), disclose(label));
 }
 
 // ── Pause / Unpause ───────────────────────────────────────────────────────────
+// While paused, every state-changing circuit fails. The read-only proofs
+// (proveTokenOwnership, proveEventAttendance, proveCredentialAttribute,
+// proveAttributeMembership) keep working.
 
+// @circuit   Emergency stop.
+// @auth      Admin: derive_pk(local_sk()) must equal adminPk.
+// @asserts   Caller is the admin.
+// @writes    isPaused = true.
+// @discloses Nothing new — the admin key compared against is already public.
 export circuit pause(): [] {
   assert(is_admin(), "Only admin can pause");
   isPaused = true;
 }
 
+// @circuit   Lifts the pause.
+// @auth      Admin.
+// @asserts   Caller is the admin.
+// @writes    isPaused = false.
+// @discloses Nothing new.
 export circuit unpause(): [] {
   assert(is_admin(), "Only admin can unpause");
   isPaused = false;
@@ -284,6 +389,13 @@ export circuit unpause(): [] {
 // not it was ever registered.
 
 // Register an issuer by their Midnight public key. Admin-only.
+// @circuit   Marks an organizer as verified.
+// @param     issuerPk  The organizer's public key (their getCallerPk).
+// @auth      Admin.
+// @asserts   Not paused; caller is the admin; no entry exists yet for this
+//            key (so a blocked key can't be re-registered).
+// @writes    issuers[issuerPk] = { isActive: true }.
+// @discloses issuerPk — it becomes a public ledger key.
 export circuit registerIssuer(issuerPk: Bytes<32>): [] {
   const pk = disclose(issuerPk);
   assert(!isPaused, "Contract is paused");
@@ -299,6 +411,12 @@ export circuit registerIssuer(issuerPk: Bytes<32>): [] {
 // blocked. A blocked issuer can't create events (createEvent) and no new
 // tokens can be minted under their existing events (mintTokenTo). There is
 // no unblock; a blocked key also can't be (re-)registered.
+// @circuit   Blocks an organizer, permanently.
+// @param     issuerPk  The public key to block.
+// @auth      Admin.
+// @asserts   Not paused; caller is the admin.
+// @writes    issuers[issuerPk] = { isActive: false }.
+// @discloses issuerPk — it becomes a public ledger key.
 export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
   const pk = disclose(issuerPk);
   assert(!isPaused, "Contract is paused");
@@ -332,6 +450,23 @@ export circuit deactivateIssuer(issuerPk: Bytes<32>): [] {
 // provable/revealable FIELDS (see computeAttributeLeaf and
 // proveAttributeMembership) — pass an all-zero Bytes<32> if the event has
 // no such structured attributes.
+// @circuit   Creates an event owned by the caller.
+// @param     label                  Organizer-chosen label, hashed into the id.
+// @param     maxSupply              Total mints allowed; 0 = unlimited.
+// @param     expiration             Block time after which minting stops;
+//                                   0 = never.
+// @param     isPublicMint           true = anyone may claim(); false = only
+//                                   mintTo().
+// @param     metadataURI            Public off-chain metadata.
+// @param     privateMetadataCommit  Commitment to hidden metadata, or zero.
+// @param     privateAttributesRoot  Root of the hidden attribute tree, or zero.
+// @returns   The derived eventId.
+// @auth      Anyone whose key is not blocked in `issuers`.
+// @asserts   Not paused; caller not deactivated; event id not already used.
+// @writes    events[eventId].
+// @discloses Every argument, plus the caller's public key (stored as
+//            organizer) — an event is public by definition.
+// @private   The caller's secret key, and whatever the two commitments hide.
 export circuit createEvent(
                  label: Bytes<32>,
                  maxSupply: Uint<64>,
@@ -370,6 +505,12 @@ export circuit createEvent(
 }
 
 // Deactivate an event. Admin or the event's own organizer.
+// @circuit   Stops new mints for an event. Existing tokens are unaffected.
+// @param     eventId  The event to deactivate.
+// @auth      Admin, or the event's organizer.
+// @asserts   Not paused; event exists; caller is admin or organizer.
+// @writes    events[eventId].isActive = false.
+// @discloses eventId (ledger key). Not which of the two roles called.
 export circuit deactivateEvent(eventId: Bytes<32>): [] {
   const evId = disclose(eventId);
   assert(!isPaused, "Contract is paused");
@@ -393,6 +534,12 @@ export circuit deactivateEvent(eventId: Bytes<32>): [] {
 // takedown of an illegal or abusive event could be undone by the very
 // organizer it targets. An organizer who deactivated their own event by
 // mistake asks the admin. Every other field is carried forward unchanged.
+// @circuit   Re-enables minting for a deactivated event.
+// @param     eventId  The event to reactivate.
+// @auth      Admin only.
+// @asserts   Not paused; event exists; caller is the admin.
+// @writes    events[eventId].isActive = true.
+// @discloses eventId (ledger key).
 export circuit reactivateEvent(eventId: Bytes<32>): [] {
   const evId = disclose(eventId);
   assert(!isPaused, "Contract is paused");
@@ -498,6 +645,21 @@ circuit mintTokenTo(
 // The event's own organizer can't claim it (e.g. follow their own
 // subscription). This only stops the organizer's own key: the check runs
 // in-circuit and publishes nothing, so a second wallet can't be detected.
+// @circuit   Self-service mint of one token of a public event to the caller.
+// @param     eventId      The event to claim.
+// @param     isSoulbound  Client-side flag, handed to store_token only. Not
+//                         enforced and not written to the ledger.
+// @auth      Anyone except the event's own organizer key.
+// @asserts   Not paused; event exists, is public-mint, active, not expired,
+//            under maxSupply; issuer not blocked; caller is not the
+//            organizer; this holder pseudonym has no token for the event.
+// @writes    totalSupply, tokenOwner, tokenEvent, tokenIssuer,
+//            tokenMetadataURI, tokenPrivateMetadataCommit, eventHolderToken,
+//            credentials (new leaf), events[eventId].minted.
+// @discloses eventId; the caller's holder pseudonym for this issuer (becomes
+//            tokenOwner) — minting is public by design.
+// @private   The secret key, and so the link between this pseudonym and the
+//            caller's pseudonyms under other issuers.
 export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
@@ -536,6 +698,27 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
 // an all-zero Bytes<32> for a credential with no private attributes.
 // Only the resulting credential leaf is written on-chain; the root itself
 // never appears in a ledger operation.
+// @circuit   Organizer push-mint, and re-issue after a revocation.
+// @param     eventId                     The event to mint for.
+// @param     recipientPk                 The recipient's holder pseudonym for
+//                                        this issuer (their getHolderPk) —
+//                                        NOT their getCallerPk.
+// @param     tokenMetadataURI            Public metadata for this token.
+// @param     tokenPrivateMetadataCommit  Commitment to hidden per-token
+//                                        metadata, or zero.
+// @param     credentialAttributesRoot    Root of this recipient's private
+//                                        attribute tree, or zero.
+// @auth      Admin, or the event's organizer.
+// @asserts   Not paused; event exists, active, not expired, under maxSupply;
+//            issuer not blocked; caller is admin or organizer; recipient is
+//            not the caller's own pseudonym; recipient has no live token for
+//            the event (a revoked one may be replaced).
+// @writes    Same fields as claim.
+// @discloses eventId, recipientPk, tokenMetadataURI,
+//            tokenPrivateMetadataCommit — all stored on the ledger.
+//            credentialAttributesRoot only reaches the chain hashed inside
+//            the credential leaf. Not which of the two roles called.
+// @private   The attribute values behind credentialAttributesRoot.
 export circuit mintTo(
                  eventId: Bytes<32>,
                  recipientPk: Bytes<32>,
@@ -581,6 +764,17 @@ export circuit mintTo(
 // or new. Side effect: other holders' proofs built against a pre-burn root
 // fail and must be rebuilt from a fresh path — acceptable since burns are
 // rare compared to proofs.
+// @circuit   Burns a token: by its holder, or as a revocation by the issuer
+//            or the admin.
+// @param     tokenId  The token to burn.
+// @auth      Token owner (holder pseudonym matches tokenOwner), the token's
+//            issuer, or the admin.
+// @asserts   Not paused; token exists; not already burned; caller is owner,
+//            issuer or admin.
+// @writes    burnedTokens[tokenId]; credentials (leaf cleared, history
+//            reset); eventHolderToken entry removed on a self-burn only.
+// @discloses tokenId. Whether it was a self-burn or a revocation is visible
+//            too (only a self-burn removes the eventHolderToken entry).
 export circuit burn(tokenId: Uint<64>): [] {
   const tId = disclose(tokenId);
   assert(!isPaused, "Contract is paused");
@@ -604,6 +798,11 @@ export circuit burn(tokenId: Uint<64>): [] {
 // Global identity: the same value for this wallet across every issuer/admin
 // context. Do NOT use this to look up a holder's token in tokenOwner — use
 // getHolderPk for that.
+// @circuit   Local helper: no proof, no transaction (touches no ledger).
+// @returns   derive_pk(local_sk()) — the caller's admin/issuer/verifier key.
+// @writes    none.
+// @discloses The returned key, to the caller only. Sharing it is the
+//            caller's choice; it links everything they do as an organizer.
 export circuit getCallerPk(): Bytes<32> {
   return caller_pk();
 }
@@ -611,6 +810,11 @@ export circuit getCallerPk(): Bytes<32> {
 // Per-issuer holder pseudonym for the caller. This is what the caller's
 // tokenOwner entries look like for this specific issuer. Share it with an
 // organizer so they can mintTo() you, or use it to check your own claims.
+// @circuit   Local helper: no proof, no transaction (touches no ledger).
+// @param     issuerId  The organizer's public key.
+// @returns   The caller's holder pseudonym under that issuer.
+// @writes    none.
+// @discloses The returned pseudonym, to the caller only.
 export circuit getHolderPk(issuerId: Bytes<32>): Bytes<32> {
   return holder_pk(issuerId);
 }
@@ -626,6 +830,13 @@ export circuit getHolderPk(issuerId: Bytes<32>): Bytes<32> {
 // persistentCommit. Works for both event- and token-level commitments —
 // value is a digest of whatever private content you want to hide, rand is
 // fresh randomness you must keep to reveal later (never reuse rand).
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     value  32-byte digest of the content to hide.
+// @param     rand   32 fresh random bytes; keep them to reveal later.
+// @returns   persistentCommit(value, rand).
+// @writes    none.
+// @discloses Nothing on-chain: disclose() here only lets the result leave
+//            the circuit, on the caller's own machine.
 export pure circuit computePrivateMetadataCommit(value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return persistentCommit<Bytes<32>>(disclose(value), disclose(rand));
 }
@@ -633,6 +844,16 @@ export pure circuit computePrivateMetadataCommit(value: Bytes<32>, rand: Bytes<3
 // Reveals an event's private metadata. Once revealed, the digest becomes
 // permanent public ledger state — commit-reveal hides *when* something
 // becomes public, not whether it ever does.
+// @circuit   Publishes the opening of an event's privateMetadataCommit.
+// @param     eventId  The event.
+// @param     value    The committed digest.
+// @param     rand     The randomness used in the commitment.
+// @auth      None: knowing the opening is the authorization.
+// @asserts   Not paused; event exists; it has a non-zero commitment;
+//            persistentCommit(value, rand) equals it.
+// @writes    eventRevealedMetadata[eventId] = value.
+// @discloses eventId, value and rand — revealing is the whole purpose.
+//            Irreversible.
 export circuit revealPrivateMetadata(eventId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
@@ -648,6 +869,15 @@ export circuit revealPrivateMetadata(eventId: Bytes<32>, value: Bytes<32>, rand:
 
 // Reveals a single token's private metadata (e.g. a hidden edition number
 // or prize tier assigned at mint time).
+// @circuit   Publishes the opening of a token's private-metadata commitment.
+// @param     tokenId  The token.
+// @param     value    The committed digest.
+// @param     rand     The randomness used in the commitment.
+// @auth      None: knowing the opening is the authorization.
+// @asserts   Not paused; token exists; it has a non-zero commitment;
+//            persistentCommit(value, rand) equals it.
+// @writes    tokenRevealedMetadata[tokenId] = value.
+// @discloses tokenId, value and rand. Irreversible.
 export circuit revealPrivateTokenMetadata(tokenId: Uint<64>, value: Bytes<32>, rand: Bytes<32>): [] {
   assert(!isPaused, "Contract is paused");
   const tId = disclose(tokenId);
@@ -731,6 +961,14 @@ circuit attribute_leaf_hash(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes
 // enums) can make the entire tree brute-forceable once any one field is
 // revealed via a proof or a leak. Derive per-leaf randomness instead,
 // e.g. rand_i = H(masterRand, eventId, fieldId).
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     eventId  The event the attribute belongs to.
+// @param     fieldId  Identifier of the attribute (e.g. hash of its name).
+// @param     value    The attribute's value, encoded to 32 bytes.
+// @param     rand     32 fresh random bytes, unique per leaf.
+// @returns   The leaf to place in the event's attribute tree.
+// @writes    none.
+// @discloses Nothing on-chain (see computePrivateMetadataCommit).
 export pure circuit computeAttributeLeaf(eventId: Bytes<32>, fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return attribute_leaf_hash(disclose(eventId), disclose(fieldId), disclose(value), disclose(rand));
 }
@@ -762,6 +1000,18 @@ circuit disclosure_request_key(verifier: Bytes<32>, label: Bytes<32>): Bytes<32>
 // not something provable on-chain. Publish sets large/generic enough that
 // membership doesn't narrow the holder's actual value down to one option,
 // if the holder's privacy is meant to survive answering.
+// @circuit   A verifier pins a question on-chain for holders to answer.
+// @param     label    Verifier-chosen label, hashed into the request id.
+// @param     eventId  The event the question is about.
+// @param     fieldId  The attribute asked about (zero for ownership-only).
+// @param     setRoot  Merkle root of the accepted values (zero for
+//                     ownership-only).
+// @returns   The derived requestId.
+// @auth      Anyone.
+// @asserts   Not paused; event exists; request id not already used.
+// @writes    disclosureRequests[requestId].
+// @discloses Every argument, the caller's public key (stored as verifier)
+//            and the request id — a request is public by definition.
 export circuit publishDisclosureRequest(
                  label: Bytes<32>,
                  eventId: Bytes<32>,
@@ -797,6 +1047,24 @@ export circuit publishDisclosureRequest(
 // as revealPrivateMetadata — it does not mutate state, but it still needs a
 // ZK argument because a third party must be able to trust the result
 // without trusting the caller.
+// @circuit   Proves an EVENT-level private attribute is in the verifier's
+//            set. Callable by whoever knows the attribute's opening
+//            (normally the organizer); holding a token is not required.
+// @param     requestId          A published disclosure request.
+// @param     value              The attribute's hidden value.
+// @param     rand               The randomness of its commitment.
+// @param     attributePath      Merkle path of the attribute leaf in the
+//                               event's attribute tree (depth 8).
+// @param     setMembershipPath  Merkle path of value in the verifier's set
+//                               (depth 16).
+// @auth      None: knowing a valid opening is the authorization.
+// @asserts   Request exists; its event exists and has an attribute root;
+//            the leaf rebuilt from (event, field, value, rand) matches
+//            attributePath and hashes up to the event's root; value matches
+//            setMembershipPath and hashes up to the request's setRoot.
+// @writes    none. Also works while the contract is paused.
+// @discloses requestId only.
+// @private   value, rand and both Merkle paths.
 export circuit proveAttributeMembership(
                  requestId: Bytes<32>,
                  value: Bytes<32>,
@@ -848,6 +1116,17 @@ circuit disclosure_nullifier(requestId: Bytes<32>): Bytes<32> {
 // i.e. the verifier who published it) that SOME wallet redeemed it. Most
 // "just answer the question" flows should call proveAttributeMembership
 // directly instead and skip this entirely.
+// @circuit   proveAttributeMembership, at most once per (wallet, request).
+// @param     (same as proveAttributeMembership)
+// @auth      None beyond knowing a valid opening.
+// @asserts   Not paused; everything proveAttributeMembership asserts; this
+//            wallet's nullifier for the request is not yet in
+//            usedDisclosures.
+// @writes    usedDisclosures (adds the nullifier).
+// @discloses requestId, and the nullifier
+//            H("adasouls:disclosure:v2:", local_sk, requestId) — needed to
+//            block replays; it reveals neither the key nor the wallet.
+// @private   value, rand, both Merkle paths, the secret key.
 export circuit proveAttributeMembershipOnce(
                  requestId: Bytes<32>,
                  value: Bytes<32>,
@@ -891,6 +1170,13 @@ export circuit proveAttributeMembershipOnce(
 // needs to look up its own Merkle path, e.g.
 // ledger.credentials.pathForLeaf(tokenId, computeCredentialLeaf(...)).
 // holderPk here is getHolderPk(issuerId) — already public in tokenOwner.
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     eventId       The token's event.
+// @param     holderPk      The holder's pseudonym under the event's issuer.
+// @param     credAttrRoot  The credential's private attribute root, or zero.
+// @returns   The credential leaf stored in `credentials`.
+// @writes    none.
+// @discloses Nothing on-chain (see computePrivateMetadataCommit).
 export pure circuit computeCredentialLeaf(eventId: Bytes<32>, holderPk: Bytes<32>, credAttrRoot: Bytes<32>): Bytes<32> {
   return credential_leaf(disclose(eventId), disclose(holderPk), disclose(credAttrRoot));
 }
@@ -899,12 +1185,31 @@ export pure circuit computeCredentialLeaf(eventId: Bytes<32>, holderPk: Bytes<32
 // private attribute tree, whose root goes into mintTo's
 // credentialAttributesRoot. Same rand rules as computeAttributeLeaf: never
 // reuse rand across leaves or credentials.
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     fieldId  Identifier of the attribute.
+// @param     value    The attribute's value, encoded to 32 bytes.
+// @param     rand     32 fresh random bytes, unique per leaf.
+// @returns   The leaf to place in the recipient's attribute tree.
+// @writes    none.
+// @discloses Nothing on-chain (see computePrivateMetadataCommit).
 export pure circuit computeCredentialAttrLeaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return credential_attr_leaf(disclose(fieldId), disclose(value), disclose(rand));
 }
 
 // Proves the caller owns live token `tokenId` of the request's event.
 // Burned tokens (self-burn or issuer/admin revocation) fail.
+// @circuit   PUBLIC ownership proof: "I own token N of your event".
+// @param     requestId  A published disclosure request.
+// @param     tokenId    The token being proven.
+// @auth      The token's owner: holder_pk(issuer) rebuilt from local_sk must
+//            equal tokenOwner[tokenId].
+// @asserts   Request exists; token exists, is not burned, belongs to the
+//            request's event; caller's pseudonym is its owner.
+// @writes    none. Also works while the contract is paused.
+// @discloses requestId and tokenId — and with tokenId, the holder pseudonym
+//            already public in tokenOwner. Use proveEventAttendance when
+//            that link must stay hidden.
+// @private   The secret key.
 export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] {
   const rid = disclose(requestId);
   const tId = disclose(tokenId);
@@ -922,6 +1227,24 @@ export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] 
 // attribute root (all-zero for claim()ed tokens), kept private.
 // Build credPath against the LATEST root: the root in the transcript tells
 // an observer which tree version the proof used.
+// @circuit   ANONYMOUS ownership proof: "I own some live token of your
+//            event".
+// @param     requestId     A published disclosure request.
+// @param     credAttrRoot  The caller's credential attribute root (zero for
+//                          claim()ed tokens).
+// @param     credPath      Merkle path of the caller's credential leaf in
+//                          `credentials` (depth 20).
+// @auth      The holder: the leaf is rebuilt from local_sk, so only the
+//            holder's key produces a leaf that is in the tree.
+// @asserts   Request and its event exist; the leaf rebuilt from (event,
+//            holder pseudonym, credAttrRoot) matches credPath; the path's
+//            root is a current or historic root of `credentials`.
+// @writes    none. Also works while the contract is paused.
+// @discloses requestId, and the credentials-tree root the path resolves to
+//            — needed for the on-chain root check; it is the same for every
+//            holder using that tree version.
+// @private   The token id, the holder pseudonym, the credential leaf,
+//            credAttrRoot and the secret key.
 export circuit proveEventAttendance(
                  requestId: Bytes<32>,
                  credAttrRoot: Bytes<32>,
@@ -946,6 +1269,28 @@ export circuit proveEventAttendance(
 // root is never an input: it's recomputed from attrPath, so the only way
 // to satisfy the credential-leaf check is with openings the organizer
 // actually committed for this holder.
+// @circuit   ANONYMOUS ownership proof plus a predicate on one of the
+//            holder's own private attributes.
+// @param     requestId          A published disclosure request.
+// @param     value              The attribute's hidden value.
+// @param     rand               The randomness of its commitment.
+// @param     attributePath      Merkle path of the attribute leaf in the
+//                               credential's attribute tree (depth 8).
+// @param     setMembershipPath  Merkle path of value in the verifier's set
+//                               (depth 16).
+// @param     credPath           Merkle path of the credential leaf in
+//                               `credentials` (depth 20).
+// @auth      The holder (same as proveEventAttendance).
+// @asserts   Request and its event exist; the attribute leaf matches
+//            attributePath; the credential leaf rebuilt from the resulting
+//            root matches credPath, whose root is known to `credentials`;
+//            value matches setMembershipPath and hashes up to the request's
+//            setRoot.
+// @writes    none. Also works while the contract is paused.
+// @discloses requestId and the credentials-tree root (see
+//            proveEventAttendance).
+// @private   value, rand, all three Merkle paths, the token id, the holder
+//            pseudonym and the secret key.
 export circuit proveCredentialAttribute(
                  requestId: Bytes<32>,
                  value: Bytes<32>,

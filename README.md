@@ -79,6 +79,10 @@ Limits worth knowing:
   behalf, can't be stopped cryptographically — true of any credential system.
 - **Set size matters.** Asking "is your value in {X}" with a one-element set is full disclosure.
 
+The full map of what is public, what is private and what can be inferred is in
+[Public and private data](docs/smart-contracts/data-privacy.md); the threat model is in
+[Security](docs/smart-contracts/security.md).
+
 ### Revocation and transfer
 
 `burn` can be called by the holder, the issuer, or the admin. It marks the token burned, removes
@@ -90,16 +94,37 @@ credentials are soulbound by construction.
 
 ---
 
+## Documentation
+
+This README is the introduction. The details are in [`docs/`](docs/README.md).
+
+**Smart contract** ([`docs/smart-contracts/`](docs/smart-contracts/README.md))
+
+| Document | What it covers |
+|---|---|
+| [Overview](docs/smart-contracts/overview.md) | The privacy problem, the actors, how callers are authorized, tokens and fees |
+| [Public and private data](docs/smart-contracts/data-privacy.md) | Where every piece of data lives and who can see it; every `disclose()`; what leaks indirectly |
+| [Circuits and flows](docs/smart-contracts/circuits.md) | Every circuit, and each use case step by step: what runs locally, what is verified on-chain |
+| [Private state](docs/smart-contracts/private-state.md) | What lives only on the user's device, and what happens if it is lost |
+| [Invariants and cryptography](docs/smart-contracts/invariants-and-cryptography.md) | What must always hold; how commitments, Merkle trees and nullifiers are built |
+| [Integration](docs/smart-contracts/integration.md) | Compiler output, witnesses in TypeScript, providers, deploying, upgrading, versions |
+| [Security](docs/smart-contracts/security.md) | Trust assumptions, threat model, known privacy limits, tests, review history |
+| [Changelog](docs/smart-contracts/changelog.md) | Contract changes and on-chain deployments |
+
+---
+
 ## Repository layout
 
 | Path | What |
 |---|---|
+| [`docs/`](docs/README.md) | Project documentation |
 | [`contracts/compact/poap.compact`](contracts/compact/poap.compact) | The contract (Compact) |
 | `contracts/src/managed/poap/` | Compiled output (JS bindings, ZKIR). Prover/verifier keys are generated locally, not committed |
 | [`contracts/src/test/`](contracts/src/test/) | Contract tests (simulator + Jest) |
 | [`contracts/src/witnesses.ts`](contracts/src/witnesses.ts) | Witness implementations (holder secret key, local token cache) |
 | [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, serves `/api/events`, `/api/tokens`, `/api/disclosure-requests` |
 | [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet or preprod) |
+| [`scripts/upgrade.ts`](scripts/upgrade.ts) | Upgrades the deployed contract's circuits in place (same address) |
 | [`deploy/production/`](deploy/production/) | Docker Compose stack + runbook for the API host |
 | [`devnet.yml`](devnet.yml) | Local Midnight devnet (node, indexer, proof server) + the indexer's Postgres |
 
