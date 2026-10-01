@@ -1,0 +1,414 @@
+openapi: 3.0.3
+info:
+  title: Velum indexer API
+  version: "0.1.0"
+  description: |
+    Read-only REST API over the public state of the Velum contract on Midnight.
+
+    This file is written by hand from the route code in `indexer/src/api/` and is the reference
+    for the API's shape. It is not generated and is not served by the API. When a route changes,
+    change this file in the same commit.
+
+    Data is eventually consistent: it reflects the chain with a delay.
+    All identifiers and hashes are 64-character lowercase hex strings without a `0x` prefix.
+servers:
+  - url: https://velum-api.adasouls.io
+    description: Preprod
+  - url: http://localhost:3001
+    description: Local
+tags:
+  - name: health
+  - name: events
+  - name: tokens
+  - name: disclosure-requests
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness check
+      description: Reports that the process is running. It does not report whether indexing is up to date.
+      responses:
+        "200":
+          description: The process is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+  /api/events:
+    get:
+      tags: [events]
+      summary: List events
+      description: Returns every event, active ones first, then by creation block ascending. Not paginated.
+      parameters:
+        - name: issuerPk
+          in: query
+          required: false
+          description: Return only events organized by this public key.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/events/{eventId}:
+    get:
+      tags: [events]
+      summary: Get one event
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: The event, with its count of non-burned tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventWithLiveTokens"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/events/{eventId}/tokens:
+    get:
+      tags: [events]
+      summary: List an event's tokens
+      description: Every token minted for the event, by token id ascending. Not paginated.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+        - name: includeBurned
+          in: query
+          required: false
+          description: Pass `false` to leave out burned tokens. Any other value, or omitting it, includes them.
+          schema:
+            type: string
+            enum: ["true", "false"]
+            default: "true"
+      responses:
+        "200":
+          description: Tokens (an empty array if the event has none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Token"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/tokens/owner/{ownerPk}:
+    get:
+      tags: [tokens]
+      summary: List tokens owned by a holder pseudonym
+      description: |
+        Every token whose owner is this holder pseudonym, burned ones included, by token id
+        ascending. A pseudonym is specific to one organizer, so the result only contains tokens
+        from that organizer. Returns an empty array for an unknown pseudonym.
+      parameters:
+        - name: ownerPk
+          in: path
+          required: true
+          description: Holder pseudonym (`holder_pk` for one issuer).
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Token"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/tokens/{tokenId}:
+    get:
+      tags: [tokens]
+      summary: Get one token
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: The token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Token"
+        "400":
+          description: The token id is not a number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: invalid tokenId
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/tokens/{tokenId}/attendance:
+    get:
+      tags: [tokens]
+      summary: Removed
+      deprecated: true
+      description: Always answers 410. A token belongs to exactly one event; read `firstEventId` on the token.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  note:
+                    type: string
+  /api/disclosure-requests:
+    get:
+      tags: [disclosure-requests]
+      summary: List disclosure requests
+      description: Every published request, by publication block ascending. Not paginated.
+      parameters:
+        - name: verifierPk
+          in: query
+          required: false
+          description: Return only requests published by this public key.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DisclosureRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/disclosure-requests/{requestId}:
+    get:
+      tags: [disclosure-requests]
+      summary: Get one disclosure request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: The request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisclosureRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Hex32"
+  responses:
+    NotFound:
+      description: No such resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Unexpected error. Details are in the server log only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: internal server error
+  schemas:
+    Hex32:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+      description: 32 bytes as 64 lowercase hex characters, no `0x` prefix.
+      example: 0aa2e6eaecb0d497f4894627e66bb98c48a579719389c44fd997086168aee0b4
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    Event:
+      type: object
+      required:
+        - eventId
+        - issuerPk
+        - maxSupply
+        - expiration
+        - isActive
+        - isPublicMint
+        - metadataURI
+        - minted
+        - privateAttributesRoot
+        - createdBlock
+        - createdTx
+        - deactivatedBlock
+      properties:
+        eventId:
+          $ref: "#/components/schemas/Hex32"
+        issuerPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The organizer's public key.
+        maxSupply:
+          type: integer
+          description: Mint cap. 0 means unlimited.
+        expiration:
+          type: integer
+          description: Block time after which minting stops. 0 means never.
+        isActive:
+          type: boolean
+        isPublicMint:
+          type: boolean
+          description: Whether anyone may claim, or only the organizer may mint.
+        metadataURI:
+          type: string
+          example: ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json
+        minted:
+          type: integer
+          description: Tokens minted so far, burned ones included.
+        privateAttributesRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: Root of the event's hidden attribute tree. All zeros means none.
+        createdBlock:
+          type: integer
+          nullable: true
+        createdTx:
+          type: string
+          nullable: true
+        deactivatedBlock:
+          type: integer
+          nullable: true
+    EventWithLiveTokens:
+      allOf:
+        - $ref: "#/components/schemas/Event"
+        - type: object
+          required: [liveTokens]
+          properties:
+            liveTokens:
+              type: integer
+              description: Number of non-burned tokens of this event.
+    Token:
+      type: object
+      required:
+        - tokenId
+        - ownerPk
+        - issuerPk
+        - firstEventId
+        - isBurned
+        - mintedBlock
+        - mintedTx
+        - burnedBlock
+        - burnedTx
+        - tokenMetadataURI
+        - tokenPrivateMetadataCommit
+        - metadataURI
+      properties:
+        tokenId:
+          type: integer
+        ownerPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The holder's pseudonym for this token's issuer.
+        issuerPk:
+          $ref: "#/components/schemas/Hex32"
+        firstEventId:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The token's event. The name is historical; a token has exactly one event.
+        isBurned:
+          type: boolean
+        mintedBlock:
+          type: integer
+          nullable: true
+        mintedTx:
+          type: string
+          nullable: true
+        burnedBlock:
+          type: integer
+          nullable: true
+        burnedTx:
+          type: string
+          nullable: true
+        tokenMetadataURI:
+          type: string
+          nullable: true
+          description: This token's own metadata. Prefer it over `metadataURI` when rendering.
+        tokenPrivateMetadataCommit:
+          type: string
+          nullable: true
+          description: Commitment to hidden per-token metadata, hex. All zeros means none.
+        metadataURI:
+          type: string
+          nullable: true
+          description: The parent event's metadata.
+    DisclosureRequest:
+      type: object
+      required:
+        - requestId
+        - verifierPk
+        - eventId
+        - fieldId
+        - setRoot
+        - publishedBlock
+        - publishedTx
+      properties:
+        requestId:
+          $ref: "#/components/schemas/Hex32"
+        verifierPk:
+          $ref: "#/components/schemas/Hex32"
+        eventId:
+          $ref: "#/components/schemas/Hex32"
+        fieldId:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The attribute asked about. All zeros for an ownership-only request.
+        setRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: Merkle root of the accepted values. All zeros for an ownership-only request.
+        publishedBlock:
+          type: integer
+          nullable: true
+        publishedTx:
+          type: string
+          nullable: true

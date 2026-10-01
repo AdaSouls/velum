@@ -80,8 +80,8 @@ Limits worth knowing:
 - **Set size matters.** Asking "is your value in {X}" with a one-element set is full disclosure.
 
 The full map of what is public, what is private and what can be inferred is in
-[Public and private data](docs/smart-contracts/data-privacy.md); the threat model is in
-[Security](docs/smart-contracts/security.md).
+[Public and private data](docs/01-contract/data-privacy.md); the threat model is in
+[Security](docs/01-contract/security.md).
 
 ### Revocation and transfer
 
@@ -96,20 +96,35 @@ credentials are soulbound by construction.
 
 ## Documentation
 
-This README is the introduction. The details are in [`docs/`](docs/README.md).
+This README is the introduction. The details are in [`docs/`](docs/README.md), in five sections:
 
-**Smart contract** ([`docs/smart-contracts/`](docs/smart-contracts/README.md))
-
-| Document | What it covers |
+| Section | What it covers |
 |---|---|
-| [Overview](docs/smart-contracts/overview.md) | The privacy problem, the actors, how callers are authorized, tokens and fees |
-| [Public and private data](docs/smart-contracts/data-privacy.md) | Where every piece of data lives and who can see it; every `disclose()`; what leaks indirectly |
-| [Circuits and flows](docs/smart-contracts/circuits.md) | Every circuit, and each use case step by step: what runs locally, what is verified on-chain |
-| [Private state](docs/smart-contracts/private-state.md) | What lives only on the user's device, and what happens if it is lost |
-| [Invariants and cryptography](docs/smart-contracts/invariants-and-cryptography.md) | What must always hold; how commitments, Merkle trees and nullifiers are built |
-| [Integration](docs/smart-contracts/integration.md) | Compiler output, witnesses in TypeScript, providers, deploying, upgrading, versions |
-| [Security](docs/smart-contracts/security.md) | Trust assumptions, threat model, known privacy limits, tests, review history |
-| [Changelog](docs/smart-contracts/changelog.md) | Contract changes and on-chain deployments |
+| [00 — Overview](docs/00-overview/README.md) | Architecture diagram, an [end-to-end data flow](docs/00-overview/data-flow.md), the [shared data contract](docs/00-overview/data-contract.md) (ledger → database → API) and a [glossary](docs/00-overview/glossary.md) |
+| [01 — Contract](docs/01-contract/README.md) | [Public and private data](docs/01-contract/data-privacy.md), [circuits and flows](docs/01-contract/circuits.md), [private state](docs/01-contract/private-state.md), [invariants and cryptography](docs/01-contract/invariants-and-cryptography.md), [integration](docs/01-contract/integration.md), [security](docs/01-contract/security.md), [changelog](docs/01-contract/changelog.md) |
+| [02 — Indexer](docs/02-indexer/README.md) | What it follows and cannot see, [mapping from ledger changes to rows](docs/02-indexer/mapping.md), [data model](docs/02-indexer/data-model.md), [sync and consistency](docs/02-indexer/sync.md), [operation](docs/02-indexer/operations.md) |
+| [03 — API](docs/03-api/README.md) | Conventions, security and privacy, the [endpoint reference](docs/03-api/endpoints.md), an [OpenAPI description](docs/03-api/openapi.yaml) and a [quickstart](docs/03-api/quickstart.md) |
+| [04 — Operations](docs/04-operations/README.md) | Environments, [local setup](docs/04-operations/local-setup.md), [deploying and upgrading](docs/04-operations/deploy.md), [monitoring and runbooks](docs/04-operations/monitoring-runbooks.md) |
+
+Good entry points:
+
+- New to the project: [Architecture](docs/00-overview/README.md), then
+  [Public and private data](docs/01-contract/data-privacy.md).
+- Calling the API: [API quickstart](docs/03-api/quickstart.md).
+- Running it: [Local setup](docs/04-operations/local-setup.md).
+
+The documentation also records [known issues](docs/README.md#known-issues-found-while-documenting)
+found while writing it.
+
+---|---|
+| [Overview](docs/01-contract/overview.md) | The privacy problem, the actors, how callers are authorized, tokens and fees |
+| [Public and private data](docs/01-contract/data-privacy.md) | Where every piece of data lives and who can see it; every `disclose()`; what leaks indirectly |
+| [Circuits and flows](docs/01-contract/circuits.md) | Every circuit, and each use case step by step: what runs locally, what is verified on-chain |
+| [Private state](docs/01-contract/private-state.md) | What lives only on the user's device, and what happens if it is lost |
+| [Invariants and cryptography](docs/01-contract/invariants-and-cryptography.md) | What must always hold; how commitments, Merkle trees and nullifiers are built |
+| [Integration](docs/01-contract/integration.md) | Compiler output, witnesses in TypeScript, providers, deploying, upgrading, versions |
+| [Security](docs/01-contract/security.md) | Trust assumptions, threat model, known privacy limits, tests, review history |
+| [Changelog](docs/01-contract/changelog.md) | Contract changes and on-chain deployments |
 
 ---
 
@@ -122,7 +137,7 @@ This README is the introduction. The details are in [`docs/`](docs/README.md).
 | `contracts/src/managed/poap/` | Compiled output (JS bindings, ZKIR). Prover/verifier keys are generated locally, not committed |
 | [`contracts/src/test/`](contracts/src/test/) | Contract tests (simulator + Jest) |
 | [`contracts/src/witnesses.ts`](contracts/src/witnesses.ts) | Witness implementations (holder secret key, local token cache) |
-| [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, serves `/api/events`, `/api/tokens`, `/api/disclosure-requests` |
+| [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, and serves the REST API (`/api/events`, `/api/tokens`, `/api/disclosure-requests`) from the same process |
 | [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet or preprod) |
 | [`scripts/upgrade.ts`](scripts/upgrade.ts) | Upgrades the deployed contract's circuits in place (same address) |
 | [`deploy/production/`](deploy/production/) | Docker Compose stack + runbook for the API host |
@@ -131,6 +146,9 @@ This README is the introduction. The details are in [`docs/`](docs/README.md).
 ---
 
 ## Getting started
+
+The short version is below. The complete procedures are in
+[Local setup](docs/04-operations/local-setup.md) and [Deploying](docs/04-operations/deploy.md).
 
 ### Prerequisites
 

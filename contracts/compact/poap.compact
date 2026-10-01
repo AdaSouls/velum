@@ -25,7 +25,7 @@
 //   @discloses  Every value that becomes public, and why that is acceptable.
 //   @private    What stays inside the proof and never reaches the chain.
 //
-// Longer explanations live in docs/smart-contracts/.
+// Longer explanations live in docs/01-contract/.
 
 pragma language_version >= 0.23;
 
@@ -79,7 +79,7 @@ export struct DisclosureRequest {
 // ── Public Ledger ─────────────────────────────────────────────────────────────
 // Everything in this section is PUBLIC, visible on-chain to anyone. Nothing
 // secret may ever be stored here in the clear — only identifiers, hashes and
-// commitments. See docs/smart-contracts/data-privacy.md for the full map.
+// commitments. See docs/01-contract/data-privacy.md for the full map.
 
 // @ledger Number of tokens ever minted; also the next tokenId. Never
 //         decremented (burns don't reduce it). Written by: claim, mintTo.

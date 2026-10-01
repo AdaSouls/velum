@@ -342,8 +342,9 @@ What the script does:
 2. **Deploys the shell build.** A deployment carrying all 18 verifier keys is rejected by the
    node for exceeding the block weight limit, so the script deploys the circuit-less shell first.
 3. **Inserts each circuit's verifier key** in its own transaction, signed by the contract's
-   maintenance authority. An interrupted run can be resumed: circuits already present are
-   skipped.
+   maintenance authority. If the run is interrupted here, finish it with
+   `scripts/upgrade.ts --apply` against the same address (it inserts the missing circuits);
+   running `deploy.ts` again would deploy a new shell.
 4. Checks the result against the full build with `findDeployedContract`.
 5. Creates a demo event.
 6. Writes `deployments/<network>.md` and `.env.<network>.local` (`.env.local` for the devnet).
