@@ -813,7 +813,7 @@ describe('POAP contract — burn', () => {
     expect(sim.getLedger().totalSupply).toBe(2n); // a fresh token, not the burned one
   });
 
-  it("an issuer/admin revocation does NOT free the slot — permanent exclusion", () => {
+  it("an issuer/admin revocation does NOT free the slot for the holder — they can't re-claim", () => {
     const sim = new PoapSimulator(ADMIN_SK);
     const eventA = sim.createEvent(EVENT_A, 100n, 0n, true);
 
@@ -821,6 +821,77 @@ describe('POAP contract — burn', () => {
     sim.asUser(ADMIN_SK).burn(0n);
 
     expect(() => sim.asUser(USER1_SK).claim(eventA, false)).toThrow();
+  });
+
+  it('after a revocation the organizer can re-issue to the same holder with mintTo', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuer1Pk);
+
+    sim.asUser(ISSUER1_SK).mintTo(eventA, user1Pk);
+    sim.burn(0n); // the organizer revokes
+    expect(() => sim.mintTo(eventA, user1Pk)).not.toThrow();
+
+    const state = sim.getLedger();
+    expect(state.tokenOwner.lookup(1n)).toEqual(user1Pk);
+    expect(state.burnedTokens.member(0n)).toBe(true);
+    expect(state.burnedTokens.member(1n)).toBe(false);
+  });
+
+  it('after an admin revocation on a public event, the admin can re-issue but the holder still cannot claim', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, true);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
+
+    sim.claim(eventA, false);
+    sim.asUser(ADMIN_SK).burn(0n);
+
+    expect(() => sim.asUser(USER1_SK).claim(eventA, false)).toThrow();
+    expect(() => sim.asUser(ADMIN_SK).mintTo(eventA, user1Pk)).not.toThrow();
+    expect(sim.getLedger().tokenOwner.lookup(1n)).toEqual(user1Pk);
+  });
+
+  it('a re-issued credential takes the slot again — no second re-issue or claim while it is live', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, true);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
+
+    sim.claim(eventA, false);
+    sim.asUser(ADMIN_SK).burn(0n);
+    sim.mintTo(eventA, user1Pk);
+
+    expect(() => sim.mintTo(eventA, user1Pk)).toThrow();
+    expect(() => sim.asUser(USER1_SK).claim(eventA, false)).toThrow();
+  });
+
+  it('a re-issued credential can be revoked and re-issued again', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
+
+    sim.asUser(ADMIN_SK).mintTo(eventA, user1Pk);
+    sim.burn(0n);
+    sim.mintTo(eventA, user1Pk);
+    sim.burn(1n);
+
+    expect(() => sim.mintTo(eventA, user1Pk)).not.toThrow();
+    expect(sim.getLedger().totalSupply).toBe(3n);
+  });
+
+  it('only the organizer or admin can re-issue after a revocation', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const adminPk = sim.getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(adminPk);
+
+    sim.asUser(ADMIN_SK).mintTo(eventA, user1Pk);
+    sim.burn(0n);
+
+    expect(() => sim.asUser(USER2_SK).mintTo(eventA, user1Pk)).toThrow();
   });
 
   it("the event's organizer can revoke (burn) a token they issued, even though they don't own it", () => {

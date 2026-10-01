@@ -426,7 +426,8 @@ circuit mintTokenTo(
           ev: EventRecord,
           tokenMetaURI: Opaque<"string">,
           tokenPrivCommit: Bytes<32>,
-          credAttrRoot: Bytes<32>
+          credAttrRoot: Bytes<32>,
+          reissueRevoked: Boolean
           ): Uint<64> {
   assert(ev.isActive, "Event is not active");
   assert(ev.expiration == 0 as Uint<64> || blockTimeLt(ev.expiration),
@@ -450,8 +451,16 @@ circuit mintTokenTo(
          "Issuer is deactivated"
          );
 
+  // The (holder, event) slot is taken while it points at a token. A
+  // self-burn removes it (see burn); an issuer/admin revocation leaves it
+  // pointing at the burned token, which still blocks the holder's own
+  // claim() but lets mintTo() (reissueRevoked) issue a replacement.
   const key = holder_event_key(pk, eventId);
-  assert(!eventHolderToken.member(key), "Wallet already claimed this event");
+  if (eventHolderToken.member(key)) {
+    assert(reissueRevoked && burnedTokens.member(eventHolderToken.lookup(key)),
+           "Wallet already claimed this event"
+           );
+  }
 
   const tokenId = totalSupply.read();
 
@@ -497,7 +506,7 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   const pk = holder_pk(ev.organizer);
   // Self-service claims carry no per-holder attributes (nobody attests
   // them) — their credential leaf just proves membership in the event.
-  const tokenId = mintTokenTo(pk, evId, ev, ev.metadataURI, ev.privateMetadataCommit, default<Bytes<32>>);
+  const tokenId = mintTokenTo(pk, evId, ev, ev.metadataURI, ev.privateMetadataCommit, default<Bytes<32>>, false);
   store_token(tokenId, ev.organizer, evId, sb);
 }
 
@@ -509,6 +518,9 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
 // Callable by admin or the event's own organizer. Never touches the
 // recipient's private state — the caller proving this transaction is the
 // organizer, not the recipient.
+//
+// Also re-issues to a recipient whose token for this event was revoked
+// (burned by the issuer or admin): the new token takes over the slot.
 //
 // credentialAttributesRoot is the root of THIS recipient's private
 // attribute tree (leaves from computeCredentialAttrLeaf) — data unique to
@@ -535,7 +547,7 @@ export circuit mintTo(
   const ev = events.lookup(evId);
   assert(is_admin() || ev.organizer == caller_pk(), "Not authorized to mint for this event");
 
-  mintTokenTo(recipient, evId, ev, tokMetaURI, tokPrivCommit, credAttrRoot);
+  mintTokenTo(recipient, evId, ev, tokMetaURI, tokPrivCommit, credAttrRoot, true);
 }
 
 // ── Token: Burn ───────────────────────────────────────────────────────────────
@@ -550,10 +562,11 @@ export circuit mintTo(
 //
 // Only a SELF-burn frees the (holder, event) claim slot, letting the same
 // wallet claim that event again (e.g. they burned by mistake, or want a
-// fresh token). An issuer/admin revocation does NOT free it — that's the
-// credential-invalidation case this circuit exists for in the first
-// place, and it should stay a real exclusion, not a temporary one the
-// holder can immediately undo by re-claiming.
+// fresh token). An issuer/admin revocation does NOT free it for the
+// holder — that's the credential-invalidation case this circuit exists for
+// in the first place, and it should stay a real exclusion, not a temporary
+// one the holder can immediately undo by re-claiming. The issuer or admin
+// can still issue a replacement credential with mintTo (see mintTokenTo).
 //
 // Every burn (self or revocation) also kills the token's credential leaf
 // and resets the tree's root history, so the credential can't be used in
