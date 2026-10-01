@@ -60,14 +60,34 @@ async function handleIssuers(
   const currSnap = snapshotMap(curr.issuers, (bytes) => toHex(bytes));
   const diff = diffMap(prevSnap, currSnap, issuerEquals);
 
+  // A new ledger entry is either a registration (active) or a block of a key that was never
+  // registered (inactive — see deactivateIssuer in poap.compact). Either way the row may already
+  // exist: handleEvents/handleTokens insert one for every organizer, registered or not. So this
+  // has to update that row, not skip it.
   for (const { k, v } of diff.added) {
-    await client.query(
-      `INSERT INTO issuers (issuer_pk, is_active, registered_block, registered_tx)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (issuer_pk) DO NOTHING`,
-      [toHex(k), v.isActive, meta.blockHeight.toString(), meta.txHash],
-    );
-    console.log(`  [+] issuer ${toHex(k).slice(0, 16)}… registered`);
+    if (v.isActive) {
+      await client.query(
+        `INSERT INTO issuers (issuer_pk, is_active, registered_block, registered_tx)
+         VALUES ($1, TRUE, $2, $3)
+         ON CONFLICT (issuer_pk) DO UPDATE
+           SET is_active        = TRUE,
+               registered_block = COALESCE(issuers.registered_block, EXCLUDED.registered_block),
+               registered_tx    = COALESCE(issuers.registered_tx, EXCLUDED.registered_tx)`,
+        [toHex(k), meta.blockHeight.toString(), meta.txHash],
+      );
+      console.log(`  [+] issuer ${toHex(k).slice(0, 16)}… registered`);
+    } else {
+      await client.query(
+        `INSERT INTO issuers (issuer_pk, is_active, deactivated_block, deactivated_tx)
+         VALUES ($1, FALSE, $2, $3)
+         ON CONFLICT (issuer_pk) DO UPDATE
+           SET is_active         = FALSE,
+               deactivated_block = COALESCE(issuers.deactivated_block, EXCLUDED.deactivated_block),
+               deactivated_tx    = COALESCE(issuers.deactivated_tx, EXCLUDED.deactivated_tx)`,
+        [toHex(k), meta.blockHeight.toString(), meta.txHash],
+      );
+      console.log(`  [-] issuer ${toHex(k).slice(0, 16)}… deactivated`);
+    }
   }
 
   for (const { k, curr: v } of diff.updated) {
@@ -129,7 +149,7 @@ async function handleEvents(
     console.log(`  [+] event ${toHex(k).slice(0, 16)}… created`);
   }
 
-  for (const { k, curr: v } of diff.updated) {
+  for (const { k, prev: before, curr: v } of diff.updated) {
     if (!v.isActive) {
       await client.query(
         `UPDATE events SET minted = $1, is_active = FALSE, deactivated_block = $2, deactivated_tx = $3
@@ -138,10 +158,14 @@ async function handleEvents(
       );
       console.log(`  [-] event ${toHex(k).slice(0, 16)}… deactivated`);
     } else {
+      // Active covers both an ordinary mint and reactivateEvent, so is_active is written too and
+      // the deactivation it undoes is cleared.
       await client.query(
-        `UPDATE events SET minted = $1 WHERE event_id = $2`,
+        `UPDATE events SET minted = $1, is_active = TRUE, deactivated_block = NULL, deactivated_tx = NULL
+         WHERE event_id = $2`,
         [v.minted.toString(), toHex(k)],
       );
+      if (!before.isActive) console.log(`  [+] event ${toHex(k).slice(0, 16)}… reactivated`);
     }
   }
 }
