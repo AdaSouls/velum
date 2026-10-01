@@ -108,6 +108,57 @@ describe('POAP contract — createEvent', () => {
   });
 });
 
+// ── Organizer self-claim ──────────────────────────────────────────────────────
+
+describe('POAP contract — organizers cannot hold their own events', () => {
+  it('the organizer cannot claim (follow) their own public event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+
+    expect(() => sim.claim(eventA, false)).toThrow();
+    expect(sim.getLedger().totalSupply).toBe(0n);
+  });
+
+  it('anyone else can still claim it', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+
+    expect(() => sim.asUser(USER1_SK).claim(eventA, false)).not.toThrow();
+  });
+
+  it('an organizer can claim ANOTHER organizer\'s event', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+
+    expect(() => sim.asUser(ISSUER2_SK).claim(eventA, false)).not.toThrow();
+  });
+
+  it('the admin can claim an event they did not organize', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, true);
+
+    expect(() => sim.asUser(ADMIN_SK).claim(eventA, false)).not.toThrow();
+  });
+
+  it('the organizer cannot push-mint to themselves', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, false);
+    const selfPk = sim.getHolderPk(issuer1Pk);
+
+    expect(() => sim.mintTo(eventA, selfPk)).toThrow();
+  });
+
+  it('the organizer can still push-mint to someone else', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const issuer1Pk = sim.asUser(ISSUER1_SK).getCallerPk();
+    const eventA = sim.createEvent(EVENT_A, 100n, 0n, false);
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuer1Pk);
+
+    expect(() => sim.asUser(ISSUER1_SK).mintTo(eventA, user1Pk)).not.toThrow();
+  });
+});
+
 // ── Moderation ────────────────────────────────────────────────────────────────
 
 describe('POAP contract — moderation', () => {

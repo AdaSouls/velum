@@ -1,10 +1,19 @@
 /**
  * Network, wallet and key setup shared by deploy.ts and upgrade.ts.
  *
- * Moved verbatim out of deploy.ts — see its module doc comment for the network-selection rules
+ * Moved out of deploy.ts — see its module doc comment for the network-selection rules
  * (MN_TEST_ENVIRONMENT / MN_TEST_WALLET_SEED) and prerequisites, which apply to both scripts.
+ *
+ * Wallet sync progress is saved to .wallet-state/ (gitignored, 0600 — it's wallet data) while
+ * syncing and restored on the next run, so only the first run pays for a full sync (~1.5-2h of
+ * DUST history on preprod); later runs only catch up on what's new. Delete the file to force a
+ * full sync.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { webcrypto, createHash } from 'node:crypto';
 import { WebSocket } from 'ws';
 
@@ -26,9 +35,23 @@ import { nativeToken } from '@midnight-ntwrk/ledger-v8';
 import { signingKeyFromBip340 } from '@midnight-ntwrk/compact-runtime';
 import {
   MidnightWalletProvider,
+  FluentWalletBuilder,
+  WalletSeeds,
+  DEFAULT_DUST_OPTIONS,
   getTestEnvironment,
   type EnvironmentConfiguration,
 } from '@midnight-ntwrk/testkit-js';
+import {
+  ShieldedWallet,
+  UnshieldedWallet,
+  DustWallet,
+  WalletFacade,
+  InMemoryTransactionHistoryStorage,
+  WalletEntrySchema,
+  mergeWalletEntries,
+  createKeystore,
+} from '@midnight-ntwrk/wallet-sdk';
+import { ZswapSecretKeys, DustSecretKey } from '@midnight-ntwrk/midnight-js-protocol/ledger';
 
 // Genesis wallet seed — the `dev` chain spec (devnet.yml's CFG_PRESET: 'dev') pre-mints NIGHT
 // to the wallet derived from this seed. Only valid on 'undeployed' (local devnet); every other
@@ -160,13 +183,106 @@ export function resolveNetwork(
 
 // Builds the wallet for seedHex, registers its NIGHT for DUST if needed and waits until it can pay
 // fees. The caller owns the returned wallet and must stop() it.
+const WALLET_STATE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.wallet-state');
+const WALLET_STATE_SAVE_INTERVAL_MS = 5 * 60_000;
+
+type SavedWalletState = { v: 1; shielded: string; unshielded: string; dust: string };
+
+// One file per network and seed; the name carries a hash of the seed, never the seed itself.
+function walletStatePath(envConfig: EnvironmentConfiguration, seedHex: string): string {
+  const seedId = createHash('sha256').update(seedHex).digest('hex').slice(0, 16);
+  return path.join(WALLET_STATE_DIR, `${envConfig.networkId}-${seedId}.json.gz`);
+}
+
+// Best effort: a failed save is logged and the sync carries on — losing a checkpoint is cheaper
+// than losing the run.
+async function saveWalletState(logger: Logger, wallet: MidnightWalletProvider, file: string): Promise<void> {
+  try {
+    const [shielded, unshielded, dust] = await Promise.all([
+      wallet.wallet.shielded.serializeState(),
+      wallet.wallet.unshielded.serializeState(),
+      wallet.wallet.dust.serializeState(),
+    ]);
+    const state: SavedWalletState = { v: 1, shielded, unshielded, dust };
+    fs.mkdirSync(WALLET_STATE_DIR, { recursive: true, mode: 0o700 });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, gzipSync(JSON.stringify(state)), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    const mb = (fs.statSync(file).size / (1024 * 1024)).toFixed(1);
+    logger.info(`Saved wallet sync state to ${path.relative(process.cwd(), file)} (${mb}MB)`);
+  } catch (err) {
+    logger.warn(`Couldn't save wallet sync state (${(err as Error).message}) — continuing without it.`);
+  }
+}
+
+// Same wallet MidnightWalletProvider.build creates (testkit's FluentWalletBuilder/WalletFactory),
+// but each sub-wallet restored from its saved state instead of started from scratch.
+async function restoreWallet(
+  logger: Logger,
+  envConfig: EnvironmentConfiguration,
+  seedHex: string,
+  saved: SavedWalletState,
+): Promise<MidnightWalletProvider> {
+  // testkit doesn't export its env → wallet-config mapping; the builder holds the result.
+  const config = (FluentWalletBuilder.forEnvironment(envConfig) as unknown as { config: any }).config;
+  const seeds = WalletSeeds.fromMasterSeed(seedHex);
+  const keystore = createKeystore(seeds.unshielded, envConfig.walletNetworkId as any);
+  const dustConfig = {
+    ...config,
+    costParameters: {
+      ledgerParams: DEFAULT_DUST_OPTIONS.ledgerParams,
+      additionalFeeOverhead: DEFAULT_DUST_OPTIONS.additionalFeeOverhead,
+      feeBlocksMargin: DEFAULT_DUST_OPTIONS.feeBlocksMargin,
+    },
+  };
+  const facade = await WalletFacade.init({
+    configuration: config,
+    shielded: () => ShieldedWallet(config).restore(saved.shielded),
+    unshielded: () =>
+      UnshieldedWallet({
+        ...config,
+        txHistoryStorage: new InMemoryTransactionHistoryStorage(WalletEntrySchema, mergeWalletEntries),
+      }).restore(saved.unshielded),
+    dust: () => DustWallet(dustConfig).restore(saved.dust),
+  });
+  return MidnightWalletProvider.withWallet(
+    logger,
+    envConfig,
+    facade,
+    ZswapSecretKeys.fromSeed(seeds.shielded),
+    DustSecretKey.fromSeed(seeds.dust),
+    keystore,
+  );
+}
+
+async function buildWallet(
+  logger: Logger,
+  envConfig: EnvironmentConfiguration,
+  seedHex: string,
+  stateFile: string,
+): Promise<MidnightWalletProvider> {
+  if (fs.existsSync(stateFile)) {
+    try {
+      const saved = JSON.parse(gunzipSync(fs.readFileSync(stateFile)).toString('utf8')) as SavedWalletState;
+      if (saved.v !== 1) throw new Error(`unknown state version ${saved.v}`);
+      const wallet = await restoreWallet(logger, envConfig, seedHex, saved);
+      logger.info(`Restored wallet sync state from ${path.relative(process.cwd(), stateFile)}`);
+      return wallet;
+    } catch (err) {
+      logger.warn(`Couldn't restore ${stateFile} (${(err as Error).message}) — doing a full sync instead.`);
+    }
+  }
+  return MidnightWalletProvider.build(logger, envConfig, seedHex);
+}
+
 export async function startFundedWallet(
   logger: Logger,
   envConfig: EnvironmentConfiguration,
   seedHex: string,
 ): Promise<MidnightWalletProvider> {
   logger.info('Building wallet...');
-  const wallet = await MidnightWalletProvider.build(logger, envConfig, seedHex);
+  const stateFile = walletStatePath(envConfig, seedHex);
+  const wallet = await buildWallet(logger, envConfig, seedHex, stateFile);
 
   // Not using MidnightWalletProvider.start()/testkit-js's waitForFunds() here: both gate on
   // syncWallet()'s requirement that shielded AND unshielded AND dust all reach
@@ -230,6 +346,7 @@ export async function startFundedWallet(
   const DUST_POLL_INTERVAL_MS = 15_000;
   let dustBalance = 0n;
   const dustPollStart = Date.now();
+  let lastSave = Date.now();
   for (;;) {
     const snapshot = await firstValueFrom(wallet.wallet.state());
     dustBalance = snapshot.dust.balance(new Date());
@@ -246,8 +363,14 @@ export async function startFundedWallet(
     if (dustBalance > 0n && dustSynced) break;
     if (dustSynced && elapsed >= DUST_BALANCE_TIMEOUT_MS) break;
     if (elapsed >= DUST_SYNC_TIMEOUT_MS) break;
+    // Saved as it goes, so a crashed or interrupted sync isn't lost either.
+    if (Date.now() - lastSave >= WALLET_STATE_SAVE_INTERVAL_MS) {
+      await saveWalletState(logger, wallet, stateFile);
+      lastSave = Date.now();
+    }
     await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
   }
+  await saveWalletState(logger, wallet, stateFile);
   if (dustBalance === 0n) {
     logger.warn(
       `DUST balance still 0 after ${Math.round((Date.now() - dustPollStart) / 60_000)}min — deploy will likely fail with an insufficient-fee error. ` +

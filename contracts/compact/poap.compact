@@ -495,6 +495,9 @@ circuit mintTokenTo(
 // Mints a fresh token to the caller for this event. The token's metadata
 // (public URI + private commitment) is inherited from the event's own —
 // use mintTo() if an organizer wants to push a personalized token instead.
+// The event's own organizer can't claim it (e.g. follow their own
+// subscription). This only stops the organizer's own key: the check runs
+// in-circuit and publishes nothing, so a second wallet can't be detected.
 export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   assert(!isPaused, "Contract is paused");
   const evId = disclose(eventId);
@@ -502,6 +505,7 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
   assert(events.member(evId), "Event does not exist");
   const ev = events.lookup(evId);
   assert(ev.isPublicMint, "Event requires organizer to mint");
+  assert(caller_pk() != ev.organizer, "Organizer cannot claim their own event");
 
   const pk = holder_pk(ev.organizer);
   // Self-service claims carry no per-holder attributes (nobody attests
@@ -521,6 +525,8 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
 //
 // Also re-issues to a recipient whose token for this event was revoked
 // (burned by the issuer or admin): the new token takes over the slot.
+// The caller can't mint to their own holder pseudonym for this event's
+// issuer — the push-mint counterpart of claim()'s organizer check.
 //
 // credentialAttributesRoot is the root of THIS recipient's private
 // attribute tree (leaves from computeCredentialAttrLeaf) — data unique to
@@ -546,6 +552,7 @@ export circuit mintTo(
   assert(events.member(evId), "Event does not exist");
   const ev = events.lookup(evId);
   assert(is_admin() || ev.organizer == caller_pk(), "Not authorized to mint for this event");
+  assert(recipient != holder_pk(ev.organizer), "Cannot mint to yourself");
 
   mintTokenTo(recipient, evId, ev, tokMetaURI, tokPrivCommit, credAttrRoot, true);
 }
