@@ -13,6 +13,8 @@ Properties that hold after every transaction. "Enforced by" says what guarantees
 | An event id can only be created by the organizer whose key is hashed into it. | `createEvent` derives the id from the caller's own key. Nobody can take another organizer's id. |
 | A blocked issuer stays blocked. | There is no unblock circuit, and `registerIssuer` refuses a key that already has an entry. |
 | A disclosure request never changes once published. | `publishDisclosureRequest` refuses an existing id; no other circuit writes the map. |
+| An addressed request can only be answered by its recipient. | `proveTokenOwnership`, `proveEventAttendance` and `proveCredentialAttribute` compare `recipient`, read from `disclosureRequests`, with the holder pseudonym rebuilt from `local_sk()`. Tested in "an addressed request can only be answered by its recipient" and "another holder who genuinely qualifies cannot answer in the recipient's place". |
+| A credential's private attribute is only ever proven for an addressed request. | `proveCredentialAttribute` rejects a request whose `recipient` is all zeros. |
 
 ### Tokens
 
@@ -56,7 +58,7 @@ While `isPaused` is true, every circuit that writes to the ledger fails, except 
 | A secret key never appears on-chain. | It only enters circuits through `local_sk()` and is only ever used as a hash input. The compiler would reject a direct disclosure path without `disclose()`, and there is none. |
 | The same holder has unlinkable pseudonyms under different organizers. | `holder_pk` hashes the issuer id together with the key. Tested in "per-issuer holder pseudonym". |
 | A holder's public key (`derive_pk`) is not published by claiming or by proving. | `claim` compares it in-circuit and stores only the pseudonym. |
-| An anonymous proof does not reveal the token, the pseudonym or the credential leaf. | These proofs use `holder_secret_pk` (no `disclose`) and disclose only the request id and a tree root. Tested in "the public transcript reveals neither the holder pseudonym nor the credential leaf". |
+| An anonymous proof (open request) does not reveal the token, the pseudonym or the credential leaf. | These proofs use `holder_secret_pk` (no `disclose`) and disclose only the request id and a tree root. Tested in "the public transcript reveals neither the holder pseudonym nor the credential leaf". |
 | An attribute proof does not reveal the attribute's value or its randomness. | `value` and `rand` are never wrapped in `disclose()` in the `prove…` circuits. |
 | A predicate proof is only meaningful against a verifier-chosen set. | The set root is read from `disclosureRequests`, never taken as an argument. |
 | Nullifiers from the same key for different requests are unlinkable. | The request id is hashed into the nullifier. |
@@ -165,5 +167,5 @@ or single-use codes.
 |---|---|
 | A holder's tokens under different organizers | Per-organizer pseudonym |
 | A holder's identity as organizer/verifier and as holder | Different hash domains (`pk` vs `holder-pk`) |
-| Two anonymous proofs by the same holder | Neither reveals anything derived from the key |
+| Two anonymous proofs by the same holder | Neither reveals anything derived from the key. Does not apply to addressed requests, which name the holder's pseudonym. |
 | Two single-use disclosures by the same key | Per-request nullifier |

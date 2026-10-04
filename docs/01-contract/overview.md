@@ -15,13 +15,17 @@ Velum separates **holding** a credential from **proving** something about it:
   circuit, the proof shows one of:
   - "I own token N of your event" (public proof),
   - "I own *some* valid token of your event" (anonymous proof),
-  - "…and a private attribute of my credential is one of the values you accept" (anonymous proof
-    over a hidden value).
+  - "…and a private attribute of my credential is one of the values you accept" (proof over a
+    hidden value, answerable only by the holder the verifier addressed).
 - Organizers can attach private data to an event or to an individual credential, and either
   reveal it later or let it be proven about without ever revealing it.
 
-What the anonymous proofs hide is which credential, which holder and which attribute value were
-involved. What they do not hide is listed in [Public and private data](data-privacy.md).
+A verifier's question is either open, so any holder of the event can answer it, or addressed to
+one holder, so nobody else can answer in their place. Questions about a credential's private
+attribute are always addressed.
+
+What the anonymous proofs hide is which credential and which holder were involved; an attribute
+proof hides the attribute's value. What they do not hide is listed in [Public and private data](data-privacy.md).
 
 ## Actors
 
@@ -30,7 +34,7 @@ involved. What they do not hide is listed in [Public and private data](data-priv
 | **Admin** | Deploys the contract. Moderates: pauses, verifies or blocks issuers, takes events down, revokes tokens. | `pause`, `unpause`, `registerIssuer`, `deactivateIssuer`, `deactivateEvent`, `reactivateEvent`, `mintTo`, `burn` |
 | **Organizer** (issuer) | Creates events and issues credentials for them. Can revoke the ones they issued. | `createEvent`, `deactivateEvent`, `mintTo`, `burn` |
 | **Holder** | Claims or receives credentials, proves things about them, can burn their own. | `claim`, `burn`, `proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttribute` |
-| **Verifier** | Publishes a question, then checks that a successful proof transaction answered it. | `publishDisclosureRequest` |
+| **Verifier** | Publishes a question, open or addressed to one holder, then checks that a successful proof transaction answered it. | `publishDisclosureRequest` |
 | **Anyone who knows an opening** | Reveals committed metadata, or proves a predicate about an event-level attribute. | `revealPrivateMetadata`, `revealPrivateTokenMetadata`, `proveAttributeMembership`, `proveAttributeMembershipOnce` |
 
 Creating events is permissionless. The issuer registry is an optional "verified" badge plus a
@@ -65,6 +69,7 @@ Each authorization check is an `assert` inside the circuit:
 | Caller is the event's organizer | `derive_pk(local_sk()) == events[eventId].organizer` |
 | Caller owns token N (public) | `holder_pk(tokenIssuer[N]) == tokenOwner[N]` |
 | Caller owns some token of the event (anonymous) | The credential leaf rebuilt from `local_sk` is in the `credentials` Merkle tree |
+| Caller is the holder a request is addressed to | The holder pseudonym rebuilt from `local_sk` equals `disclosureRequests[requestId].recipient` |
 | Caller may reveal committed metadata | They supply a `(value, rand)` pair that opens the on-chain commitment. No identity check. |
 
 The proof convinces the chain that the prover *knows* a secret key that hashes to the stored

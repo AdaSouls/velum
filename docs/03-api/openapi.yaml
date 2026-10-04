@@ -199,6 +199,12 @@ paths:
           description: Return only requests published by this public key.
           schema:
             $ref: "#/components/schemas/Hex32"
+        - name: recipientPk
+          in: query
+          required: false
+          description: Return only requests addressed to this holder pseudonym.
+          schema:
+            $ref: "#/components/schemas/Hex32"
       responses:
         "200":
           description: Requests
@@ -389,6 +395,7 @@ components:
         - eventId
         - fieldId
         - setRoot
+        - recipientPk
         - publishedBlock
         - publishedTx
       properties:
@@ -406,6 +413,13 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hex32"
           description: Merkle root of the accepted values. All zeros for an ownership-only request.
+        recipientPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          nullable: true
+          description: >-
+            Holder pseudonym (a token's ownerPk) the request is addressed to; only that holder can
+            answer it. null for an open request, which any holder of the event can answer.
         publishedBlock:
           type: integer
           nullable: true

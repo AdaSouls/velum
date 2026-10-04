@@ -12,6 +12,22 @@ it needs an upgrade, a new deployment, or nothing.
 
 ## Unreleased
 
+- **Addressed disclosure requests.** `DisclosureRequest` gains a `recipient` field and
+  `publishDisclosureRequest` a `recipient` argument: the holder pseudonym (`getHolderPk`) that
+  must answer, or all zeros for an open request.
+  - `proveTokenOwnership` and `proveEventAttendance` enforce the recipient when the request has
+    one. Open requests behave as before.
+  - **Breaking:** `proveCredentialAttribute` rejects open requests. A credential's private
+    attribute can only be proven by the holder the request is addressed to; before, any holder
+    of the event with a qualifying attribute could answer.
+  - `proveAttributeMembership` and `proveAttributeMembershipOnce` (event-level attributes)
+    ignore the recipient.
+  - Indexer: new column `disclosure_requests.recipient_pk` (migration `003`); API: new field
+    `recipientPk` and filter `?recipientPk=` on `/api/disclosure-requests`.
+
+  **Needs: new deployment.** The ledger layout (`DisclosureRequest`) and a circuit signature
+  (`publishDisclosureRequest`) changed. New address, indexer database reset, and a frontend build
+  with the new contract artifacts. Not deployed yet.
 - Structured documentation tags added to the contract (`@ledger`, `@witness`, `@circuit`, …) and
   the `docs/` folder created. **Needs: nothing.** Prover and verifier keys are byte-identical to
   the previous build; only line numbers in the generated `contract/index.js` changed.

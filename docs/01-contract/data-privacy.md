@@ -38,7 +38,7 @@ Data lives in one of four places:
 | Which tokens are burned | `burnedTokens` | |
 | (holder, event) → token index | `eventHolderToken` | The key is a hash of two public values |
 | Credential tree: leaf hashes and roots | `credentials` | See [below](#the-credentials-tree) |
-| Disclosure requests: verifier's public key, event, field id, set root | `disclosureRequests` | Anyone can see what verifiers ask |
+| Disclosure requests: verifier's public key, event, field id, set root, recipient pseudonym (if addressed) | `disclosureRequests` | Anyone can see what verifiers ask, and of whom when a request is addressed |
 | Single-use nullifiers | `usedDisclosures` | Not linkable to a wallet |
 | Revealed metadata digests | `eventRevealedMetadata`, `tokenRevealedMetadata` | Public once revealed, permanently |
 
@@ -59,7 +59,7 @@ These are passed to a circuit but never disclosed.
 |---|---|---|
 | Attribute `value` and `rand` | `proveAttributeMembership`, `proveAttributeMembershipOnce`, `proveCredentialAttribute` | |
 | Attribute, set and credential Merkle paths | the same, plus `proveEventAttendance` | Only the credential path's *root* is disclosed |
-| Token id, holder pseudonym, credential leaf | `proveEventAttendance`, `proveCredentialAttribute` | This is what makes them anonymous |
+| Token id, holder pseudonym, credential leaf | `proveEventAttendance`, `proveCredentialAttribute` | This is what makes an open attendance proof anonymous. Answering an addressed request shows that its recipient answered, so the pseudonym is known there. |
 | The credential's attribute root | `proveEventAttendance`, `mintTo` | In `mintTo` it reaches the chain only hashed inside the credential leaf |
 | `isSoulbound` | `claim` | Goes to the `store_token` witness only |
 
@@ -130,7 +130,7 @@ compiler would reject any accidental ledger use of it.
 | `mintTo` | `credentialAttributesRoot` | Only hashed inside the credential leaf | The leaf must be on-chain for later proofs |
 | `burn` | `tokenId` | Yes | A burn is public |
 | `revealPrivateMetadata`, `revealPrivateTokenMetadata` | id, `value`, `rand` | `value` is stored | Revealing is the purpose. Treat `rand` as public too after a reveal. |
-| `publishDisclosureRequest` | `label`, `eventId`, `fieldId`, `setRoot`, the derived request id | Yes, stored. `label` only as part of the request id hash. | A request is public |
+| `publishDisclosureRequest` | `label`, `eventId`, `fieldId`, `setRoot`, `recipient`, the derived request id | Yes, stored. `label` only as part of the request id hash. | A request is public, including who it is addressed to |
 | `proveAttributeMembership`, `proveAttributeMembershipOnce` | `requestId` | Yes, ledger key | The verifier must be able to find the answer to their request |
 | `proveTokenOwnership` | `requestId`, `tokenId` | Yes, ledger keys | This is the public proof; use `proveEventAttendance` to hide the token |
 | `proveEventAttendance`, `proveCredentialAttribute` | `requestId`, the credential path's Merkle root | Yes | The chain has to check the root against the tree. The root is the same for every holder using that tree version. |
@@ -175,9 +175,12 @@ Nothing in this section is a bug. It is what the design gives away through metad
 
 - **The anonymity set is the event's live credentials.** In an event with five holders, an
   anonymous proof narrows the prover down to one of five.
-- **`proveCredentialAttribute` narrows it further**, to holders whose credential has a matching
-  attribute. If only one holder of the event was minted with attributes, the choice of circuit
-  alone identifies them.
+- **An addressed request has no anonymity set.** The request names one holder pseudonym on the
+  ledger and only that holder can answer, so a successful proof shows that pseudonym answered.
+  What stays hidden is what the proof was about: the token id and the attribute value.
+- **`proveCredentialAttribute` is never anonymous.** It only accepts addressed requests, so every
+  proof about a credential's private attribute is tied to a named pseudonym. The value itself
+  is not disclosed.
 - **Whether a token carries private attributes is visible.** Anyone can recompute the leaf a
   token would have with a zero attribute root and compare it with the tree.
 - **Set size.** A request whose accepted set has one member turns "is a member" into "has exactly
@@ -187,9 +190,11 @@ Nothing in this section is a bug. It is what the design gives away through metad
 - **Tree version.** The disclosed root identifies the state of the tree the path was built
   against. Building against the latest root keeps the prover among everyone proving at that
   moment; an old root narrows down when the path was built.
-- **Relaying.** A proof shows that *someone* holding a valid credential answered the request, not
-  that it was the person in front of the verifier. A holder can forward the request to another
-  holder. Publish one request per verification session to keep answers fresh.
+- **Relaying.** A proof for an open request shows that *someone* holding a valid credential
+  answered, not that it was the person in front of the verifier. A holder can forward the request
+  to another holder. Publish one request per verification session to keep answers fresh, and
+  address the request when it matters who answers. An addressed request can only be answered
+  with the recipient's secret key; it still cannot stop the recipient from sharing that key.
 
 ### Burns
 

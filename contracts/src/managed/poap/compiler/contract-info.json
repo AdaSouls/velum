@@ -469,6 +469,13 @@
             "type-name": "Bytes",
             "length": 32
           }
+        },
+        {
+          "name": "recipient",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
         }
       ],
       "result-type": {
@@ -1468,6 +1475,13 @@
           },
           {
             "name": "setRoot",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "recipient",
             "type": {
               "type-name": "Bytes",
               "length": 32

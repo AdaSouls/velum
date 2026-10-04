@@ -286,8 +286,8 @@ async function handleDisclosureRequests(
   for (const { k, v } of diff.added) {
     await client.query(
       `INSERT INTO disclosure_requests
-         (request_id, verifier_pk, event_id, field_id, set_root, published_block, published_tx)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+         (request_id, verifier_pk, event_id, field_id, set_root, recipient_pk, published_block, published_tx)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (request_id) DO NOTHING`,
       [
         toHex(k),
@@ -295,6 +295,8 @@ async function handleDisclosureRequests(
         toHex(v.eventId),
         toHex(v.fieldId),
         toHex(v.setRoot),
+        // All-zero recipient = open request → NULL.
+        v.recipient.some((b) => b !== 0) ? toHex(v.recipient) : null,
         meta.blockHeight.toString(),
         meta.txHash,
       ],

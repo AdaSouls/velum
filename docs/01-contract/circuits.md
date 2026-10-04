@@ -34,7 +34,7 @@ The contract exports 25 circuits. 18 of them need a proof and a transaction.
 | `burn(tokenId)` | Owner, issuer or admin | Burns or revokes a token |
 | `revealPrivateMetadata(eventId, value, rand)` | Anyone with the opening | Publishes an event's committed metadata digest |
 | `revealPrivateTokenMetadata(tokenId, value, rand)` | Anyone with the opening | Publishes a token's committed metadata digest |
-| `publishDisclosureRequest(label, eventId, fieldId, setRoot)` | Anyone | Pins a verifier's question; returns its id |
+| `publishDisclosureRequest(label, eventId, fieldId, setRoot, recipient)` | Anyone | Pins a verifier's question, open or addressed to one holder; returns its id |
 | `proveAttributeMembershipOnce(requestId, value, rand, attributePath, setMembershipPath)` | Anyone with the opening | Proof below, plus a single-use nullifier |
 
 ### Proof-only (proof + transaction, no ledger writes)
@@ -42,11 +42,16 @@ The contract exports 25 circuits. 18 of them need a proof and a transaction.
 These signal success by not failing. A verifier looks for a confirmed transaction that called the
 circuit with their `requestId`. They also work while the contract is paused.
 
+A request is either **open** (`recipient` all zeros: any holder of the event can answer) or
+**addressed** (`recipient` is a holder pseudonym: only that holder can answer). The three holder
+proofs enforce the recipient of an addressed request. `proveCredentialAttribute` accepts addressed
+requests only.
+
 | Circuit | Proves | Becomes public |
 |---|---|---|
-| `proveTokenOwnership(requestId, tokenId)` | Caller owns live token N of the request's event | request id, token id |
-| `proveEventAttendance(requestId, credAttrRoot, credPath)` | Caller owns some live token of the request's event | request id, a credentials-tree root |
-| `proveCredentialAttribute(requestId, value, rand, attributePath, setMembershipPath, credPath)` | Same, and the credential's private attribute is in the request's set | request id, a credentials-tree root |
+| `proveTokenOwnership(requestId, tokenId)` | Caller owns live token N of the request's event, and is the recipient if the request is addressed | request id, token id |
+| `proveEventAttendance(requestId, credAttrRoot, credPath)` | Caller owns some live token of the request's event, and is the recipient if the request is addressed | request id, a credentials-tree root |
+| `proveCredentialAttribute(requestId, value, rand, attributePath, setMembershipPath, credPath)` | Caller is the request's recipient, owns a live token of its event, and the credential's private attribute is in the request's set | request id, a credentials-tree root; through the request, who answered |
 | `proveAttributeMembership(requestId, value, rand, attributePath, setMembershipPath)` | An event-level private attribute is in the request's set | request id |
 
 ### Local helpers (no proof, no transaction)
@@ -156,19 +161,33 @@ recipient's private state is not touched; they find the token through the indexe
 
 1. For an attribute question, build a depth-16 Merkle tree over the accepted values (up to 65,536)
    and keep its root. For an ownership-only question, use all-zero `fieldId` and `setRoot`.
-2. Call `publishDisclosureRequest(label, eventId, fieldId, setRoot)`.
-3. Give the returned `requestId` to the holder, together with the list of accepted values so they
+2. Decide who may answer. To address the request to one person, get their holder pseudonym for
+   the event's issuer: they read it with `getHolderPk(issuerId)` and hand it over, and it is the
+   `ownerPk` of their token in the API, so it can be checked before publishing. For an open
+   request, use an all-zero `recipient`. A question about a credential's private attribute
+   (flow 7) must be addressed.
+3. Call `publishDisclosureRequest(label, eventId, fieldId, setRoot, recipient)`.
+4. Give the returned `requestId` to the holder, together with the list of accepted values so they
    can build a membership path.
 
 **Verified on-chain**
 
 - Not paused; the event exists; no request exists yet with id `H(verifierPk, label)`.
+- The recipient is stored as given. It is not checked against `tokenOwner`: a request addressed
+  to a pseudonym with no live credential of the event can simply never be answered.
 
 **Why this step exists:** a circuit argument is chosen by the prover. If the prover could pass the
 set root directly, they could invent a one-element set containing their own value, and the proof
 would mean nothing. Reading the root from the ledger makes it the verifier's choice. It also ties
 each proof to one request, so the verifier can tell a fresh answer from an old one. Publish one
 request per verification session.
+
+**Why address a request:** an open request can be answered by any holder of the event, so the
+person in front of the verifier can pass it to someone else who qualifies. An addressed request
+stores the pseudonym on the ledger, and the proof circuits compare it with the pseudonym rebuilt
+from the prover's own secret key. The cost is that an addressed request, and so who answered it,
+is public. That fits a verifier who already knows the person, such as an admissions office
+checking an applicant. Use an open request when the holder should stay anonymous.
 
 ### 5. Prove ownership (public)
 
@@ -180,6 +199,7 @@ request per verification session.
 - The token exists, is not burned and belongs to the request's event.
 - `holder_pk(tokenIssuer[tokenId])`, derived from the caller's secret key, equals
   `tokenOwner[tokenId]`.
+- If the request is addressed, that pseudonym equals the request's `recipient`.
 
 **The verifier learns** which token, and therefore which pseudonym, answered.
 
@@ -195,15 +215,18 @@ request per verification session.
 **Verified on-chain**
 
 - The request and its event exist.
+- If the request is addressed, the caller's pseudonym, rebuilt from their secret key, equals the
+  request's `recipient`.
 - The leaf rebuilt *inside the circuit* from the request's event, the caller's secret key and
   `credAttrRoot` equals the path's leaf.
 - The path's root is a root the `credentials` tree has had since the last burn.
 
 **The verifier learns** that someone holds a live credential of the event. Not which token, not
-which pseudonym. The tree is historic, so a path built before later mints still verifies. A burn
+which pseudonym. For an addressed request the pseudonym is known, since only the recipient can
+answer; the token id still stays out of the transcript. The tree is historic, so a path built before later mints still verifies. A burn
 resets the root history: paths built before it stop working and must be rebuilt.
 
-### 7. Prove a private credential attribute (anonymous)
+### 7. Prove a private credential attribute (addressed)
 
 **Locally**
 
@@ -216,6 +239,8 @@ resets the root history: paths built before it stop working and must be rebuilt.
 **Verified on-chain**
 
 - The request and its event exist.
+- The request is addressed (an open request is rejected), and the caller's pseudonym, rebuilt
+  from their secret key, equals its `recipient`.
 - `(fieldId from the request, value, rand)` hashes to the attribute path's leaf.
 - The attribute path's root, combined with the event and the caller's pseudonym, gives the
   credential path's leaf. The attribute root is never an input: it is recomputed, so only

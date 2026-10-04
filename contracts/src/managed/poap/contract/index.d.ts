@@ -16,7 +16,8 @@ export type IssuerRecord = { organizerPk: Uint8Array; isActive: boolean };
 export type DisclosureRequest = { verifier: Uint8Array;
                                   eventId: Uint8Array;
                                   fieldId: Uint8Array;
-                                  setRoot: Uint8Array
+                                  setRoot: Uint8Array;
+                                  recipient: Uint8Array
                                 };
 
 export type Witnesses<PS> = {
@@ -72,7 +73,8 @@ export type ImpureCircuits<PS> = {
                            label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
-                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+                           setRoot_0: Uint8Array,
+                           recipient_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
                            requestId_0: Uint8Array,
                            value_0: Uint8Array,
@@ -178,7 +180,8 @@ export type ProvableCircuits<PS> = {
                            label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
-                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+                           setRoot_0: Uint8Array,
+                           recipient_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
                            requestId_0: Uint8Array,
                            value_0: Uint8Array,
@@ -313,7 +316,8 @@ export type Circuits<PS> = {
                            label_0: Uint8Array,
                            eventId_0: Uint8Array,
                            fieldId_0: Uint8Array,
-                           setRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+                           setRoot_0: Uint8Array,
+                           recipient_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   proveAttributeMembership(context: __compactRuntime.CircuitContext<PS>,
                            requestId_0: Uint8Array,
                            value_0: Uint8Array,

@@ -326,14 +326,17 @@ export class PoapSimulator {
   // this set?") on-chain BEFORE a holder can prove against it — this is
   // what pins setRoot/eventId/fieldId so proveAttributeMembership can't be
   // satisfied by a self-invented set. Returns the derived requestId.
+  // `recipient` addresses the request to one holder pseudonym (getHolderPk);
+  // the all-zero default publishes an open request any holder can answer.
   publishDisclosureRequest(
     label: Uint8Array,
     eventId: Uint8Array,
     fieldId: Uint8Array,
     setRoot: Uint8Array,
+    recipient: Uint8Array = new Uint8Array(32),
   ): Uint8Array {
     const result = this.contract.impureCircuits.publishDisclosureRequest(
-      this.circuitContext, label, eventId, fieldId, setRoot,
+      this.circuitContext, label, eventId, fieldId, setRoot, recipient,
     );
     this.circuitContext = result.context;
     this.savePrivateState();

@@ -69,11 +69,20 @@ export struct IssuerRecord {
 // ledger state (instead of letting the prover supply setRoot themselves)
 // is what makes the resulting proof mean anything: a caller-supplied root
 // is trivially satisfiable for any value.
+//
+// recipient addresses the request to ONE holder: the holder pseudonym
+// (getHolderPk under the event's issuer — the tokenOwner value) that must
+// answer it. All-zero means "open": any holder of the event may answer.
+// Pinned here for the same reason as setRoot — the holder-side proofs
+// compare it against the pseudonym rebuilt from the prover's own secret
+// key, so nobody else can answer in the recipient's place (see
+// assert_addressed_to).
 export struct DisclosureRequest {
   verifier: Bytes<32>,
   eventId: Bytes<32>,
   fieldId: Bytes<32>,
   setRoot: Bytes<32>,
+  recipient: Bytes<32>,
 }
 
 // ── Public Ledger ─────────────────────────────────────────────────────────────
@@ -167,8 +176,9 @@ export ledger usedDisclosures: Set<Bytes<32>>;
 // lookup() is what makes eventId/fieldId/setRoot actually public and
 // checkable in proveAttributeMembership, instead of trusting whatever the
 // prover claims — see DisclosureRequest and publishDisclosureRequest.
-// @ledger Immutable once published; the verifier's key is public too.
-//         Written by: publishDisclosureRequest.
+// @ledger Immutable once published; the verifier's key and the recipient
+//         pseudonym (if any) are public too. Written by:
+//         publishDisclosureRequest.
 export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 
 // Credential commitment tree — the anonymous counterpart to tokenOwner.
@@ -1000,12 +1010,24 @@ circuit disclosure_request_key(verifier: Bytes<32>, label: Bytes<32>): Bytes<32>
 // not something provable on-chain. Publish sets large/generic enough that
 // membership doesn't narrow the holder's actual value down to one option,
 // if the holder's privacy is meant to survive answering.
+//
+// `recipient` addresses the request to one holder (their getHolderPk under
+// this event's issuer, which the holder hands to the verifier and which is
+// already public in tokenOwner). Pass an all-zero Bytes<32> for an open
+// request. An addressed request is public like everything else here: anyone
+// can see WHO was asked, and a successful answer shows that this pseudonym
+// answered. What stays hidden is the attribute's value. The recipient is
+// not checked against tokenOwner at publish time — a request addressed to a
+// pseudonym with no live credential simply can never be answered.
 // @circuit   A verifier pins a question on-chain for holders to answer.
 // @param     label    Verifier-chosen label, hashed into the request id.
 // @param     eventId  The event the question is about.
 // @param     fieldId  The attribute asked about (zero for ownership-only).
 // @param     setRoot  Merkle root of the accepted values (zero for
 //                     ownership-only).
+// @param     recipient  Holder pseudonym the request is addressed to, or
+//                       zero for an open request. Required (non-zero) for a
+//                       request meant for proveCredentialAttribute.
 // @returns   The derived requestId.
 // @auth      Anyone.
 // @asserts   Not paused; event exists; request id not already used.
@@ -1016,18 +1038,20 @@ export circuit publishDisclosureRequest(
                  label: Bytes<32>,
                  eventId: Bytes<32>,
                  fieldId: Bytes<32>,
-                 setRoot: Bytes<32>
+                 setRoot: Bytes<32>,
+                 recipient: Bytes<32>
                  ): Bytes<32> {
   assert(!isPaused, "Contract is paused");
   const lbl = disclose(label);
   const evId = disclose(eventId);
   const fId = disclose(fieldId);
   const sRoot = disclose(setRoot);
+  const rcpt = disclose(recipient);
   assert(events.member(evId), "Event does not exist");
   const verifier = caller_pk();
   const rid = disclose(disclosure_request_key(verifier, lbl));
   assert(!disclosureRequests.member(rid), "Request already published");
-  const req = DisclosureRequest { verifier: verifier, eventId: evId, fieldId: fId, setRoot: sRoot };
+  const req = DisclosureRequest { verifier: verifier, eventId: evId, fieldId: fId, setRoot: sRoot, recipient: rcpt };
   disclosureRequests.insert(rid, req);
   return rid;
 }
@@ -1050,6 +1074,8 @@ export circuit publishDisclosureRequest(
 // @circuit   Proves an EVENT-level private attribute is in the verifier's
 //            set. Callable by whoever knows the attribute's opening
 //            (normally the organizer); holding a token is not required.
+//            The request's recipient is ignored here: an event attribute is
+//            not a holder's data, so there is no holder to address.
 // @param     requestId          A published disclosure request.
 // @param     value              The attribute's hidden value.
 // @param     rand               The randomness of its commitment.
@@ -1157,14 +1183,36 @@ export circuit proveAttributeMembershipOnce(
 //   proveEventAttendance  — ANONYMOUS: "I own SOME live token of this
 //                           event", via the credentials tree. Reveals only
 //                           requestId, eventId and a tree root.
-//   proveCredentialAttribute — ANONYMOUS + a predicate over the holder's
-//                           OWN private attributes (set by mintTo).
+//   proveCredentialAttribute — a predicate over the holder's OWN private
+//                           attributes (set by mintTo), value kept hidden.
 //
 // Like proveAttributeMembership, all three signal success by not throwing
 // and write nothing: a verifier checks for a successful transaction calling
-// the circuit with their requestId. That also means a holder can relay the
-// request to someone else who holds the same POAP — inherent to any
+// the circuit with their requestId. That also means a holder can relay an
+// OPEN request to someone else who holds the same POAP — inherent to any
 // stateless proof; publish one request per verification session.
+//
+// An ADDRESSED request (req.recipient non-zero) closes that gap: all three
+// circuits then also require the prover's own holder pseudonym to equal
+// the recipient, so only that one holder can answer. The price is
+// anonymity — the request names the pseudonym publicly — so the two
+// "anonymous" circuits then hide only what they prove ABOUT the credential
+// (which token, which attribute value), not who answered.
+//
+//   proveTokenOwnership, proveEventAttendance — open or addressed, the
+//                           verifier's choice.
+//   proveCredentialAttribute — addressed ONLY. A holder's private data is
+//                           asked of one person; an open request is
+//                           rejected.
+
+// Fails unless the request is open or `holderPk` (the prover's pseudonym,
+// always rebuilt from local_sk by the caller of this helper — never a
+// circuit argument) is the holder it is addressed to.
+circuit assert_addressed_to(req: DisclosureRequest, holderPk: Bytes<32>): [] {
+  assert(req.recipient == default<Bytes<32>> || req.recipient == holderPk,
+         "Request is addressed to another holder"
+         );
+}
 
 // Pure off-chain helper (wallet tooling): the credential leaf the wallet
 // needs to look up its own Merkle path, e.g.
@@ -1204,7 +1252,8 @@ export pure circuit computeCredentialAttrLeaf(fieldId: Bytes<32>, value: Bytes<3
 // @auth      The token's owner: holder_pk(issuer) rebuilt from local_sk must
 //            equal tokenOwner[tokenId].
 // @asserts   Request exists; token exists, is not burned, belongs to the
-//            request's event; caller's pseudonym is its owner.
+//            request's event; caller's pseudonym is its owner and, for an
+//            addressed request, is the recipient.
 // @writes    none. Also works while the contract is paused.
 // @discloses requestId and tokenId — and with tokenId, the holder pseudonym
 //            already public in tokenOwner. Use proveEventAttendance when
@@ -1218,7 +1267,9 @@ export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] 
   assert(tokenOwner.member(tId), "Unknown token");
   assert(!burnedTokens.member(tId), "Token burned");
   assert(tokenEvent.lookup(tId) == req.eventId, "Token is not for the requested event");
-  assert(tokenOwner.lookup(tId) == holder_pk(tokenIssuer.lookup(tId)), "Not the owner");
+  const ownerPk = holder_pk(tokenIssuer.lookup(tId));
+  assert(tokenOwner.lookup(tId) == ownerPk, "Not the owner");
+  assert_addressed_to(req, ownerPk);
 }
 
 // Proves the caller owns SOME live token of the request's event, without
@@ -1227,6 +1278,9 @@ export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] 
 // attribute root (all-zero for claim()ed tokens), kept private.
 // Build credPath against the LATEST root: the root in the transcript tells
 // an observer which tree version the proof used.
+// Answering an ADDRESSED request is not anonymous: only the recipient can,
+// so a successful call shows that pseudonym answered (the token id still
+// isn't in the transcript).
 // @circuit   ANONYMOUS ownership proof: "I own some live token of your
 //            event".
 // @param     requestId     A published disclosure request.
@@ -1236,15 +1290,16 @@ export circuit proveTokenOwnership(requestId: Bytes<32>, tokenId: Uint<64>): [] 
 //                          `credentials` (depth 20).
 // @auth      The holder: the leaf is rebuilt from local_sk, so only the
 //            holder's key produces a leaf that is in the tree.
-// @asserts   Request and its event exist; the leaf rebuilt from (event,
-//            holder pseudonym, credAttrRoot) matches credPath; the path's
-//            root is a current or historic root of `credentials`.
+// @asserts   Request and its event exist; for an addressed request, the
+//            caller's pseudonym is the recipient; the leaf rebuilt from
+//            (event, holder pseudonym, credAttrRoot) matches credPath; the
+//            path's root is a current or historic root of `credentials`.
 // @writes    none. Also works while the contract is paused.
 // @discloses requestId, and the credentials-tree root the path resolves to
 //            — needed for the on-chain root check; it is the same for every
 //            holder using that tree version.
-// @private   The token id, the holder pseudonym, the credential leaf,
-//            credAttrRoot and the secret key.
+// @private   The token id, the credential leaf, credAttrRoot and the secret
+//            key. The holder pseudonym too, for an open request.
 export circuit proveEventAttendance(
                  requestId: Bytes<32>,
                  credAttrRoot: Bytes<32>,
@@ -1255,22 +1310,30 @@ export circuit proveEventAttendance(
   const req = disclosureRequests.lookup(rid);
   assert(events.member(req.eventId), "Event does not exist");
   const ev = events.lookup(req.eventId);
-  const leaf = credential_leaf(req.eventId, holder_secret_pk(ev.organizer), credAttrRoot);
+  const holderPk = holder_secret_pk(ev.organizer);
+  assert_addressed_to(req, holderPk);
+  const leaf = credential_leaf(req.eventId, holderPk, credAttrRoot);
   assert(credPath.leaf == leaf, "Path does not match this holder's credential");
   assert(credentials.checkRoot(disclose(merkleTreePathRoot<20, Bytes<32>>(credPath))),
          "Credential not in tree");
 }
 
-// Proves the caller owns SOME live token of the request's event AND that
-// the private attribute req.fieldId committed in THAT credential (via
-// mintTo's credentialAttributesRoot) is a member of the set pinned at
-// req.setRoot — revealing neither the token, the holder, nor the value.
+// Proves the caller is the holder the request is ADDRESSED to, owns a live
+// token of the request's event, AND that the private attribute req.fieldId
+// committed in THAT credential (via mintTo's credentialAttributesRoot) is a
+// member of the set pinned at req.setRoot — revealing neither the token nor
+// the value. Who answered is public: the request names its recipient.
+//
+// Open requests are rejected. With one, any holder of the event whose own
+// attribute satisfied the set could answer, so the person a verifier is
+// actually dealing with could hand the request to someone else who
+// qualifies; the proof would say nothing about THEM.
 // Same pinned-set reasoning as proveAttributeMembership. The attribute
 // root is never an input: it's recomputed from attrPath, so the only way
 // to satisfy the credential-leaf check is with openings the organizer
 // actually committed for this holder.
-// @circuit   ANONYMOUS ownership proof plus a predicate on one of the
-//            holder's own private attributes.
+// @circuit   Addressed proof of a predicate on one of the recipient's own
+//            private attributes, without revealing its value.
 // @param     requestId          A published disclosure request.
 // @param     value              The attribute's hidden value.
 // @param     rand               The randomness of its commitment.
@@ -1280,17 +1343,20 @@ export circuit proveEventAttendance(
 //                               (depth 16).
 // @param     credPath           Merkle path of the credential leaf in
 //                               `credentials` (depth 20).
-// @auth      The holder (same as proveEventAttendance).
-// @asserts   Request and its event exist; the attribute leaf matches
+// @auth      The request's recipient only: the pseudonym rebuilt from
+//            local_sk must equal req.recipient.
+// @asserts   Request and its event exist; the request is addressed, and to
+//            the caller's pseudonym; the attribute leaf matches
 //            attributePath; the credential leaf rebuilt from the resulting
 //            root matches credPath, whose root is known to `credentials`;
 //            value matches setMembershipPath and hashes up to the request's
 //            setRoot.
 // @writes    none. Also works while the contract is paused.
 // @discloses requestId and the credentials-tree root (see
-//            proveEventAttendance).
-// @private   value, rand, all three Merkle paths, the token id, the holder
-//            pseudonym and the secret key.
+//            proveEventAttendance). Through the request, that its recipient
+//            answered.
+// @private   value, rand, all three Merkle paths, the token id and the
+//            secret key.
 export circuit proveCredentialAttribute(
                  requestId: Bytes<32>,
                  value: Bytes<32>,
@@ -1304,6 +1370,9 @@ export circuit proveCredentialAttribute(
   const req = disclosureRequests.lookup(rid);
   assert(events.member(req.eventId), "Event does not exist");
   const ev = events.lookup(req.eventId);
+  assert(req.recipient != default<Bytes<32>>, "Request must be addressed to a holder");
+  const holderPk = holder_secret_pk(ev.organizer);
+  assert_addressed_to(req, holderPk);
 
   // 1. (value, rand) opens one of this credential's attribute leaves.
   assert(attributePath.leaf == credential_attr_leaf(req.fieldId, value, rand),
@@ -1311,7 +1380,7 @@ export circuit proveCredentialAttribute(
   const credAttrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field);
 
   // 2. That attribute root belongs to a live credential of the caller.
-  const leaf = credential_leaf(req.eventId, holder_secret_pk(ev.organizer), credAttrRoot);
+  const leaf = credential_leaf(req.eventId, holderPk, credAttrRoot);
   assert(credPath.leaf == leaf, "Path does not match this holder's credential");
   assert(credentials.checkRoot(disclose(merkleTreePathRoot<20, Bytes<32>>(credPath))),
          "Credential not in tree");

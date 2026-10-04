@@ -1314,6 +1314,7 @@ describe('POAP contract — proveAttributeMembershipOnce (single-use disclosure)
 
 const ZERO_32 = new Uint8Array(32);
 const REQ_LABEL = new Uint8Array(32).fill(0x0d);
+const ADDRESSED_LABEL = new Uint8Array(32).fill(0x1d);
 
 function setUpOwnershipFixture() {
   const sim = new PoapSimulator(ADMIN_SK);
@@ -1360,6 +1361,17 @@ describe('POAP contract — proveTokenOwnership (public ownership proof)', () =>
     expect(() => sim.asUser(USER1_SK).proveTokenOwnership(requestId, 0n)).toThrow('Token burned');
     sim.asUser(ISSUER1_SK).burn(1n);
     expect(() => sim.asUser(USER2_SK).proveTokenOwnership(requestId, 1n)).toThrow('Token burned');
+  });
+
+  it('an addressed request can only be answered by its recipient', () => {
+    const { sim, eventA, issuerPk } = setUpOwnershipFixture();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    const addressed = sim.asUser(ADMIN_SK).publishDisclosureRequest(ADDRESSED_LABEL, eventA, ZERO_32, ZERO_32, user1Pk);
+    expect(sim.getLedger().disclosureRequests.lookup(addressed).recipient).toEqual(user1Pk);
+    expect(() => sim.asUser(USER1_SK).proveTokenOwnership(addressed, 0n)).not.toThrow();
+    // USER2 genuinely owns token 1 of the same event — still not the one asked.
+    expect(() => sim.asUser(USER2_SK).proveTokenOwnership(addressed, 1n))
+      .toThrow('Request is addressed to another holder');
   });
 });
 
@@ -1460,6 +1472,31 @@ describe('POAP contract — proveEventAttendance (anonymous ownership proof)', (
     expect(() => sim.proveEventAttendance(requestId, ZERO_32, sim.credentialPath(1n, issuerPk))).not.toThrow();
   });
 
+  it('an addressed request can only be answered by its recipient', () => {
+    const { sim, eventA, issuerPk } = setUpOwnershipFixture();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    const addressed = sim.asUser(ADMIN_SK).publishDisclosureRequest(ADDRESSED_LABEL, eventA, ZERO_32, ZERO_32, user1Pk);
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveEventAttendance(addressed, ZERO_32, sim.credentialPath(0n, issuerPk))).not.toThrow();
+    // USER2 holds a live credential of the same event and proves with their
+    // OWN valid path — enough for an open request, not for this one.
+    sim.asUser(USER2_SK);
+    expect(() => sim.proveEventAttendance(addressed, ZERO_32, sim.credentialPath(1n, issuerPk)))
+      .toThrow('Request is addressed to another holder');
+  });
+
+  it('a request addressed to a pseudonym with no credential can never be answered', () => {
+    const { sim, eventA, issuerPk } = setUpOwnershipFixture();
+    sim.asUser(ISSUER2_SK); // never claimed
+    const strangerPk = sim.getHolderPk(issuerPk);
+    const addressed = sim.asUser(ADMIN_SK)
+      .publishDisclosureRequest(ADDRESSED_LABEL, eventA, ZERO_32, ZERO_32, strangerPk);
+    sim.asUser(ISSUER2_SK);
+    const forged = buildMerklePath(PoapSimulator.computeCredentialLeaf(eventA, strangerPk, ZERO_32), 20);
+    expect(() => sim.proveEventAttendance(addressed, ZERO_32, { leaf: forged.leaf, path: forged.path }))
+      .toThrow('Credential not in tree');
+  });
+
   it('the public transcript reveals neither the holder pseudonym nor the credential leaf', () => {
     const { sim, eventA, issuerPk, requestId } = setUpOwnershipFixture();
     sim.asUser(USER2_SK);
@@ -1473,7 +1510,7 @@ describe('POAP contract — proveEventAttendance (anonymous ownership proof)', (
   });
 });
 
-describe('POAP contract — proveCredentialAttribute (anonymous per-credential attribute)', () => {
+describe('POAP contract — proveCredentialAttribute (addressed per-credential attribute)', () => {
   const FIELD_TIER = new Uint8Array(32).fill(0x7e);
   const GOLD = new Uint8Array(32).fill(0x61);
   const SILVER = new Uint8Array(32).fill(0x62);
@@ -1481,7 +1518,7 @@ describe('POAP contract — proveCredentialAttribute (anonymous per-credential a
 
   // ISSUER1 push-mints USER1 a credential whose private tier is GOLD
   // (token 0), and USER2 a plain one with no attributes (token 1). The
-  // verifier pins the set {GOLD}.
+  // verifier pins the set {GOLD} in a request addressed to USER1.
   function setUp() {
     const sim = new PoapSimulator(ADMIN_SK);
     const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false);
@@ -1492,10 +1529,11 @@ describe('POAP contract — proveCredentialAttribute (anonymous per-credential a
     sim.asUser(ISSUER1_SK).mintTo(eventA, user1Pk, 'ipfs://x', ZERO_32, attr.rootBytes);
     sim.mintTo(eventA, user2Pk);
     const set = buildMerklePath(GOLD, 16);
-    const requestId = sim.asUser(ADMIN_SK).publishDisclosureRequest(REQ_LABEL, eventA, FIELD_TIER, set.rootBytes);
+    const requestId = sim.asUser(ADMIN_SK)
+      .publishDisclosureRequest(REQ_LABEL, eventA, FIELD_TIER, set.rootBytes, user1Pk);
     const attrPath = { leaf: attr.leaf, path: attr.path };
     const setPath = { leaf: set.leaf, path: set.path };
-    return { sim, issuerPk, requestId, attr, attrPath, setPath };
+    return { sim, eventA, issuerPk, user1Pk, user2Pk, requestId, attr, set, attrPath, setPath };
   }
 
   it('the holder proves their private tier is in the pinned set', () => {
@@ -1531,7 +1569,7 @@ describe('POAP contract — proveCredentialAttribute (anonymous per-credential a
     sim.asUser(ISSUER1_SK).mintTo(eventB, user1Pk, 'ipfs://x', ZERO_32, attr.rootBytes); // token 2
     const goldSet = buildMerklePath(GOLD, 16);
     const reqB = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(new Uint8Array(32).fill(0x0f), eventB, FIELD_TIER, goldSet.rootBytes);
+      .publishDisclosureRequest(new Uint8Array(32).fill(0x0f), eventB, FIELD_TIER, goldSet.rootBytes, user1Pk);
     const silverSet = buildMerklePath(SILVER, 16); // prover's own set
     sim.asUser(USER1_SK);
     expect(() => sim.proveCredentialAttribute(
@@ -1544,17 +1582,51 @@ describe('POAP contract — proveCredentialAttribute (anonymous per-credential a
     const { sim, issuerPk, requestId, attr, attrPath, setPath } = setUp();
     const user1CredPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, attr.rootBytes);
     expect(() => sim.asUser(USER2_SK).proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, user1CredPath))
-      .toThrow("Path does not match this holder's credential");
+      .toThrow('Request is addressed to another holder');
   });
 
   it('a holder without that attribute cannot prove it', () => {
-    const { sim, issuerPk, requestId, attrPath, setPath } = setUp();
+    const { sim, eventA, issuerPk, user2Pk, set, attrPath, setPath } = setUp();
+    const reqUser2 = sim.asUser(ADMIN_SK)
+      .publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes, user2Pk);
     sim.asUser(USER2_SK);
     // USER2's real credential has an all-zero attribute root; grafting
     // USER1's attribute tree onto it produces a leaf that isn't in the tree.
     const user2Path = sim.credentialPath(1n, issuerPk);
-    expect(() => sim.proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, user2Path))
+    expect(() => sim.proveCredentialAttribute(reqUser2, GOLD, RAND, attrPath, setPath, user2Path))
       .toThrow("Path does not match this holder's credential");
+  });
+
+  it('rejects an open request: private attributes are only asked of one holder', () => {
+    const { sim, eventA, issuerPk, attr, set, attrPath, setPath } = setUp();
+    const open = sim.asUser(ADMIN_SK).publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes);
+    sim.asUser(USER1_SK);
+    const credPath = sim.credentialPath(0n, issuerPk, attr.rootBytes);
+    expect(() => sim.proveCredentialAttribute(open, GOLD, RAND, attrPath, setPath, credPath))
+      .toThrow('Request must be addressed to a holder');
+  });
+
+  it('another holder who genuinely qualifies cannot answer in the recipient\'s place', () => {
+    const { sim, eventA, requestId, issuerPk, setPath } = setUp();
+    // ISSUER2's wallet gets its own GOLD credential for the same event
+    // (token 2): a fully valid proof of its own, for a request that was
+    // addressed to USER1.
+    const RAND_3 = new Uint8Array(32).fill(0x34);
+    const user3Pk = sim.asUser(ISSUER2_SK).getHolderPk(issuerPk);
+    const attr3 = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_TIER, GOLD, RAND_3), 8);
+    sim.asUser(ISSUER1_SK).mintTo(eventA, user3Pk, 'ipfs://x', ZERO_32, attr3.rootBytes);
+    sim.asUser(ISSUER2_SK);
+    const proof = [
+      GOLD, RAND_3, { leaf: attr3.leaf, path: attr3.path }, setPath, sim.credentialPath(2n, issuerPk, attr3.rootBytes),
+    ] as const;
+    expect(() => sim.proveCredentialAttribute(requestId, ...proof))
+      .toThrow('Request is addressed to another holder');
+    // The same proof is fine once a request is addressed to that holder.
+    const set = buildMerklePath(GOLD, 16);
+    const reqUser3 = sim.asUser(ADMIN_SK)
+      .publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes, user3Pk);
+    sim.asUser(ISSUER2_SK);
+    expect(() => sim.proveCredentialAttribute(reqUser3, ...proof)).not.toThrow();
   });
 
   it('revocation: an issuer burn kills the attribute proof', () => {

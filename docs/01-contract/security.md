@@ -79,6 +79,8 @@ identify you. Neither is built into the web app.
 - Can publish a request with a tiny accepted set, so that answering it reveals the value. Holders'
   clients should show the set and its size before proving.
 - Can correlate an anonymous proof with the person they just handed the request to.
+- Can address a request to any pseudonym, which publishes that this holder was asked something
+  about this event. The holder is not forced to answer, and only they can.
 - Cannot learn more than membership from the proof itself.
 
 ## Known privacy limits
@@ -94,8 +96,9 @@ Metadata that leaks by design or that the contract cannot prevent.
 6. **Whether a credential carries private attributes is visible.**
 7. **Self-burn versus revocation is visible.**
 8. **Small accepted sets disclose the value.** The contract cannot enforce a minimum set size.
-9. **Credentials can be lent or relayed.** Someone who shares their key, or proves on another
-   person's behalf, cannot be stopped cryptographically.
+9. **Credentials can be lent or relayed.** An open request can be answered by any holder of the
+   event. An addressed request can only be answered with the recipient's secret key, but someone
+   who shares that key cannot be stopped cryptographically.
 10. **The fee payer is outside the contract's control.** Transactions are paid for by a wallet.
     Whether fee payment links a user's transactions to each other or to their wallet has not
     been analysed in this repository; do not assume it does not.
@@ -103,6 +106,9 @@ Metadata that leaks by design or that the contract cannot prevent.
 12. **The proof server sees everything private.** On the public site this is an open decision,
     see [`deploy/production/README.md`](../../deploy/production/README.md#proof-server-open-decision):
     hosting a shared proof server would hand it every user's key.
+13. **Addressed requests are not anonymous.** The recipient's pseudonym is on the ledger, and a
+    successful answer shows that pseudonym answered. Every proof about a credential's private
+    attribute is addressed.
 
 ## Known issues and open items
 
@@ -122,7 +128,7 @@ Metadata that leaks by design or that the contract cannot prevent.
 ```bash
 cd contracts
 npm run compact     # the tests run against the compiled output
-npm test            # 120 tests, about 15 seconds
+npm test            # 125 tests, about 15 seconds
 ```
 
 The suite is [`contracts/src/test/poap.test.ts`](../../contracts/src/test/poap.test.ts), driven
@@ -145,9 +151,9 @@ hostile caller" is modelled.
 | Disclosure requests | Unknown event rejected, duplicate label rejected, labels do not collide across verifiers |
 | Attribute proofs | Valid proof accepted; rejected for: unpublished request, mismatched set root, wrong opening, tampered path, value outside the set, event without attributes; no ledger writes |
 | Single-use proofs | Nullifier recorded, replay rejected, invented request rejected, different request allowed |
-| Ownership proof | Owner accepted; non-owner, unknown token, wrong event, burned or revoked token rejected |
-| Anonymous proofs | Fresh and historic paths accepted; another holder's path, a self-built tree, a different event and a burned credential rejected; root history reset on burn; **the public transcript contains neither the pseudonym nor the leaf** |
-| Credential attributes | Valid proof accepted; false value, value outside the set, leaked openings used by another holder, holder without the attribute and revoked credential rejected |
+| Ownership proof | Owner accepted; non-owner, unknown token, wrong event, burned or revoked token rejected; addressed request rejected for an owner who is not the recipient |
+| Anonymous proofs | Fresh and historic paths accepted; another holder's path, a self-built tree, a different event and a burned credential rejected; addressed request rejected for another holder and for a recipient with no credential; root history reset on burn; **the public transcript contains neither the pseudonym nor the leaf** |
+| Credential attributes | Valid proof by the recipient accepted; open request, **another holder with a genuinely qualifying credential**, false value, value outside the set, leaked openings used by another holder, holder without the attribute and revoked credential rejected |
 
 Tests that reject invalid private inputs are the ones to keep when refactoring: they are what
 shows an `assert` actually constrains something. Two are regression tests for exploits that

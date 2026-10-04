@@ -74,6 +74,7 @@ Use `tokenMetadataURI` to render the credential; `metadataURI` is the event's, f
 | `eventId` | hex string | `disclosure_requests.event_id` | `.eventId` |
 | `fieldId` | hex string | `disclosure_requests.field_id` | `.fieldId` (zeros = ownership-only) |
 | `setRoot` | hex string | `disclosure_requests.set_root` | `.setRoot` (zeros = ownership-only) |
+| `recipientPk` | hex string or `null` | `disclosure_requests.recipient_pk` | `.recipient`: the holder pseudonym (a token's `ownerPk`) that must answer. `null` (zeros on the ledger) = open request |
 | `publishedBlock` | number or `null` | `disclosure_requests.published_block` | block of the `publishDisclosureRequest` transaction |
 | `publishedTx` | string or `null` | `disclosure_requests.published_tx` | hash of that transaction |
 
@@ -280,6 +281,7 @@ Every published disclosure request, by publication block ascending. Not paginate
 | Parameter | In | Required | Description |
 |---|---|---|---|
 | `verifierPk` | query | no | Only requests published by this public key |
+| `recipientPk` | query | no | Only requests addressed to this holder pseudonym |
 
 | Status | Body |
 |---|---|
@@ -298,13 +300,15 @@ curl "https://velum-api.adasouls.io/api/disclosure-requests?verifierPk=e8a483ec4
     "eventId": "e66a035b06598dc62fac699291c2f3841dc746f1fedb45201bb11a2b219525a0",
     "fieldId": "0000000000000000000000000000000000000000000000000000000000000000",
     "setRoot": "0000000000000000000000000000000000000000000000000000000000000000",
+    "recipientPk": null,
     "publishedBlock": 2785313,
     "publishedTx": "ead87331b45b9ff42970f3d6f50ce573d1e7864c359db016f90f99d5f8ffc602"
   }
 ]
 ```
 
-This one is an ownership-only request: `fieldId` and `setRoot` are all zeros.
+This one is an open, ownership-only request: `fieldId` and `setRoot` are all zeros and
+`recipientPk` is `null`, so any holder of the event can answer it.
 
 ---
 
