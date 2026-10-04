@@ -28,7 +28,7 @@ npm install
 cd contracts
 npm run compact          # full build with keys, a few minutes
 npm run compact:shell    # the circuit-less build used by the deploy script
-npm test                 # 120 contract tests, no network needed
+npm test                 # 125 contract tests, no network needed
 cd ..
 ```
 

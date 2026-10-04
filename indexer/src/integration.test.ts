@@ -30,9 +30,10 @@ import * as nodePath from 'node:path';
 
 import { applyStateDiff } from './poap-state.js';
 import { startSubscription } from './subscriptions.js';
-import type { LedgerView, EventRecord, IssuerRecord } from './parser.js';
+import type { LedgerView, EventRecord, IssuerRecord, DisclosureRequest } from './parser.js';
 import { eventsRouter } from './api/routes/events.js';
 import { tokensRouter } from './api/routes/tokens.js';
+import { disclosuresRouter } from './api/routes/disclosures.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -129,6 +130,25 @@ function withEventActive(base: LedgerView, eventId: Uint8Array, isActive: boolea
   };
 }
 
+function withDisclosureRequest(
+  base: LedgerView,
+  requestId: Uint8Array,
+  verifier: Uint8Array,
+  eventId: Uint8Array,
+  recipient: Uint8Array = new Uint8Array(32),
+): LedgerView {
+  const req: DisclosureRequest = {
+    verifier, eventId, fieldId: new Uint8Array(32), setRoot: new Uint8Array(32), recipient,
+  };
+  return {
+    ...base,
+    disclosureRequests: [
+      ...(base.disclosureRequests as Array<[Uint8Array, DisclosureRequest]>),
+      [requestId, req],
+    ],
+  };
+}
+
 function withBurn(base: LedgerView, tokenId: bigint): LedgerView {
   return {
     ...base,
@@ -185,6 +205,7 @@ beforeAll(async () => {
   app.use(express.json());
   app.use('/api/events', eventsRouter(pool));
   app.use('/api/tokens', tokensRouter(pool));
+  app.use('/api/disclosure-requests', disclosuresRouter(pool));
 
   server = createServer(app);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -548,6 +569,32 @@ describe('POAP indexer — component integration', () => {
   });
 
   // ── Regressions ──────────────────────────────────────────────────────────────
+
+  it('publishDisclosureRequest → open and addressed requests expose recipientPk, and ?recipientPk= filters', async () => {
+    if (!pool) return;
+
+    const REQ_OPEN = bytes(0x71);
+    const REQ_ADDRESSED = bytes(0x72);
+    const s0 = emptyLedger();
+    const s1 = withEvent(s0, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', s0, s1, { txHash: '0xdd01', blockHeight: 1n });
+    const s2 = withDisclosureRequest(s1, REQ_OPEN, USER2_PK, EVENT_A);
+    await applyStateDiff(pool, 'publishDisclosureRequest', s1, s2, { txHash: '0xdd02', blockHeight: 2n });
+    const s3 = withDisclosureRequest(s2, REQ_ADDRESSED, USER2_PK, EVENT_A, USER1_PK);
+    await applyStateDiff(pool, 'publishDisclosureRequest', s2, s3, { txHash: '0xdd03', blockHeight: 3n });
+
+    const all = await (await fetch(`${apiBase}/api/disclosure-requests`)).json() as any[];
+    expect(all.map((r) => [r.requestId, r.recipientPk])).toEqual([
+      [hex(REQ_OPEN), null],
+      [hex(REQ_ADDRESSED), hex(USER1_PK)],
+    ]);
+
+    const mine = await (await fetch(`${apiBase}/api/disclosure-requests?recipientPk=${hex(USER1_PK)}`)).json() as any[];
+    expect(mine.map((r) => r.requestId)).toEqual([hex(REQ_ADDRESSED)]);
+
+    const one = await (await fetch(`${apiBase}/api/disclosure-requests/${hex(REQ_ADDRESSED)}`)).json() as any;
+    expect(one.recipientPk).toBe(hex(USER1_PK));
+  });
 
   it('reactivateEvent → event is active again and its deactivation is cleared', async () => {
     if (!pool) return;

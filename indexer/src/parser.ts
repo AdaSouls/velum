@@ -53,6 +53,8 @@ export type DisclosureRequest = {
   eventId: Uint8Array;
   fieldId: Uint8Array;
   setRoot: Uint8Array;
+  // Holder pseudonym the request is addressed to; all-zero = open request.
+  recipient: Uint8Array;
 };
 
 export type LedgerView = {
@@ -176,7 +178,8 @@ export function disclosureRequestEquals(a: DisclosureRequest, b: DisclosureReque
     toHex(a.verifier) === toHex(b.verifier) &&
     toHex(a.eventId) === toHex(b.eventId) &&
     toHex(a.fieldId) === toHex(b.fieldId) &&
-    toHex(a.setRoot) === toHex(b.setRoot)
+    toHex(a.setRoot) === toHex(b.setRoot) &&
+    toHex(a.recipient) === toHex(b.recipient)
   );
 }
 

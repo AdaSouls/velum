@@ -1,7 +1,8 @@
 # Data model
 
 The schema is in [`indexer/db/migrations/`](../../indexer/db/migrations/): `001_init.sql`
-creates the tables and `002_uint64_columns.sql` widens three columns. Every file is applied on
+creates the tables, `002_uint64_columns.sql` widens three columns and
+`003_disclosure_request_recipient.sql` adds `disclosure_requests.recipient_pk`. Every file is applied on
 every start, in name order, and is safe to run repeatedly.
 
 Production runs Postgres 16; the local devnet runs Postgres 15.
@@ -145,6 +146,7 @@ Immutable once inserted.
 | `event_id` | `TEXT` FK → `events` | Event asked about | `.eventId` |
 | `field_id` | `TEXT` | Attribute asked about. All zeros = ownership-only. | `.fieldId` |
 | `set_root` | `TEXT` | Merkle root of accepted values. All zeros = ownership-only. | `.setRoot` |
+| `recipient_pk` | `TEXT`, nullable | Holder pseudonym the request is addressed to. `NULL` = open request. | `.recipient` (all zeros → `NULL`) |
 | `published_block`, `published_tx` | `BIGINT`, `TEXT` | Publishing transaction | tx |
 | `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
 
@@ -183,6 +185,7 @@ has an action. See [Operation](operations.md#measuring-lag) before using it for 
 | `tokens_first_event_id_idx` | `tokens(first_event_id)` | `GET /api/events/:eventId/tokens`, `liveTokens` |
 | `events_issuer_pk_idx` | `events(issuer_pk)` | `GET /api/events?issuerPk=` |
 | `disclosure_requests_verifier_pk_idx` | `disclosure_requests(verifier_pk)` | `GET /api/disclosure-requests?verifierPk=` |
+| `disclosure_requests_recipient_pk_idx` | `disclosure_requests(recipient_pk)` | `GET /api/disclosure-requests?recipientPk=` |
 | `disclosure_requests_event_id_idx` | `disclosure_requests(event_id)` | not used by a current endpoint |
 
 ## Migrations

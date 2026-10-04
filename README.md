@@ -12,7 +12,8 @@ soulbound credentials that holders can prove things about **without revealing th
   - that they hold **some** valid credential of an event, without revealing which one
     (**anonymous** proof), or
   - that a private attribute of their credential belongs to a set a verifier asked about
-    ("my tier is in {gold, platinum}") — without revealing the value, or who they are.
+    ("my tier is in {gold, platinum}") — without revealing the value. The verifier addresses
+    this question to one holder, and only that holder can answer it.
 - Issuers can revoke. Credentials are non-transferable by construction.
 
 This repository contains the Compact smart contract, the indexer that serves its state over a
@@ -53,11 +54,15 @@ Every proof answers a **disclosure request** a verifier published on-chain first
 the prover can't pick their own "set" to prove against, and the verifier can tell a fresh proof
 for *their* request apart from any other.
 
+A request is **open** (any holder of the event can answer) or **addressed** to one holder's
+pseudonym (only that holder can answer, so the request can't be handed to someone else who
+qualifies). Questions about a credential's private attribute are always addressed.
+
 | Circuit | Proves | Reveals |
 |---|---|---|
 | `proveTokenOwnership` | "I own token #N of your event" | the token id (and so the holder's pseudonym for that issuer) |
 | `proveEventAttendance` | "I own *some* live credential of your event" | only the request, the event and a tree root |
-| `proveCredentialAttribute` | …and its private attribute `X` is in your set | only the request, the event and a tree root |
+| `proveCredentialAttribute` | "I am the holder you asked, and my credential's private attribute `X` is in your set" | the request (which names the holder), the event and a tree root — not the value |
 | `proveAttributeMembership` | an **event-level** private attribute is in your set | the request |
 | `proveAttributeMembershipOnce` | same, at most once per holder (nullifier) | the request and a nullifier |
 
@@ -69,14 +74,16 @@ for *their* request apart from any other.
 | Which pseudonym holds which token, of which event | Which pseudonyms belong to the same person across issuers |
 | Burns / revocations | Private attribute values (unless the organizer chooses to reveal them) |
 | Commitments (metadata, attribute roots, credential leaves) | **Which** holder produced an anonymous proof |
-| Disclosure requests and single-use nullifiers | |
+| Disclosure requests (and who they are addressed to) and single-use nullifiers | |
 
 Limits worth knowing:
 
 - **Minting is public.** Anonymity applies when *proving*, not when receiving a credential.
 - **The anonymity set is the live credentials of that event.** In a small event it's small.
-- **Credentials can be lent.** Someone who shares their secret key, or proves on someone else's
-  behalf, can't be stopped cryptographically — true of any credential system.
+- **Credentials can be lent.** Someone who shares their secret key can't be stopped
+  cryptographically — true of any credential system. An open request can also be answered by any
+  other holder of the event; address the request when it matters who answers.
+- **Addressed requests aren't anonymous.** The request names the holder's pseudonym on-chain.
 - **Set size matters.** Asking "is your value in {X}" with a one-element set is full disclosure.
 
 The full map of what is public, what is private and what can be inferred is in

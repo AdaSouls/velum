@@ -5,18 +5,19 @@ const _descriptor_0 = new __compactRuntime.CompactTypeBytes(32);
 
 class _DisclosureRequest_0 {
   alignment() {
-    return _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment())));
+    return _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment()))));
   }
   fromValue(value_0) {
     return {
       verifier: _descriptor_0.fromValue(value_0),
       eventId: _descriptor_0.fromValue(value_0),
       fieldId: _descriptor_0.fromValue(value_0),
-      setRoot: _descriptor_0.fromValue(value_0)
+      setRoot: _descriptor_0.fromValue(value_0),
+      recipient: _descriptor_0.fromValue(value_0)
     }
   }
   toValue(value_0) {
-    return _descriptor_0.toValue(value_0.verifier).concat(_descriptor_0.toValue(value_0.eventId).concat(_descriptor_0.toValue(value_0.fieldId).concat(_descriptor_0.toValue(value_0.setRoot))));
+    return _descriptor_0.toValue(value_0.verifier).concat(_descriptor_0.toValue(value_0.eventId).concat(_descriptor_0.toValue(value_0.fieldId).concat(_descriptor_0.toValue(value_0.setRoot).concat(_descriptor_0.toValue(value_0.recipient)))));
   }
 }
 
@@ -87,7 +88,7 @@ class _MerkleTreePathEntry_0 {
 
 const _descriptor_8 = new _MerkleTreePathEntry_0();
 
-const _descriptor_9 = new __compactRuntime.CompactTypeVector(20, _descriptor_8);
+const _descriptor_9 = new __compactRuntime.CompactTypeVector(8, _descriptor_8);
 
 class _MerkleTreePath_0 {
   alignment() {
@@ -106,7 +107,7 @@ class _MerkleTreePath_0 {
 
 const _descriptor_10 = new _MerkleTreePath_0();
 
-const _descriptor_11 = new __compactRuntime.CompactTypeVector(8, _descriptor_8);
+const _descriptor_11 = new __compactRuntime.CompactTypeVector(16, _descriptor_8);
 
 class _MerkleTreePath_1 {
   alignment() {
@@ -125,7 +126,7 @@ class _MerkleTreePath_1 {
 
 const _descriptor_12 = new _MerkleTreePath_1();
 
-const _descriptor_13 = new __compactRuntime.CompactTypeVector(16, _descriptor_8);
+const _descriptor_13 = new __compactRuntime.CompactTypeVector(20, _descriptor_8);
 
 class _MerkleTreePath_2 {
   alignment() {
@@ -257,7 +258,7 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('pause',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 368 char 1',
+                                     'poap.compact line 378 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
@@ -280,7 +281,7 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('unpause',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 378 char 1',
+                                     'poap.compact line 388 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
@@ -304,14 +305,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('registerIssuer',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 399 char 1',
+                                     'poap.compact line 409 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(issuerPk_0.buffer instanceof ArrayBuffer && issuerPk_0.BYTES_PER_ELEMENT === 1 && issuerPk_0.length === 32)) {
           __compactRuntime.typeError('registerIssuer',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 399 char 1',
+                                     'poap.compact line 409 char 1',
                                      'Bytes<32>',
                                      issuerPk_0)
         }
@@ -340,14 +341,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('deactivateIssuer',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 420 char 1',
+                                     'poap.compact line 430 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(issuerPk_0.buffer instanceof ArrayBuffer && issuerPk_0.BYTES_PER_ELEMENT === 1 && issuerPk_0.length === 32)) {
           __compactRuntime.typeError('deactivateIssuer',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 420 char 1',
+                                     'poap.compact line 430 char 1',
                                      'Bytes<32>',
                                      issuerPk_0)
         }
@@ -382,49 +383,49 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(label_0.buffer instanceof ArrayBuffer && label_0.BYTES_PER_ELEMENT === 1 && label_0.length === 32)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Bytes<32>',
                                      label_0)
         }
         if (!(typeof(maxSupply_0) === 'bigint' && maxSupply_0 >= 0n && maxSupply_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Uint<0..18446744073709551616>',
                                      maxSupply_0)
         }
         if (!(typeof(expiration_0) === 'bigint' && expiration_0 >= 0n && expiration_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Uint<0..18446744073709551616>',
                                      expiration_0)
         }
         if (!(typeof(isPublicMint_0) === 'boolean')) {
           __compactRuntime.typeError('createEvent',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Boolean',
                                      isPublicMint_0)
         }
         if (!(privateMetadataCommit_0.buffer instanceof ArrayBuffer && privateMetadataCommit_0.BYTES_PER_ELEMENT === 1 && privateMetadataCommit_0.length === 32)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 6 (argument 7 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Bytes<32>',
                                      privateMetadataCommit_0)
         }
         if (!(privateAttributesRoot_0.buffer instanceof ArrayBuffer && privateAttributesRoot_0.BYTES_PER_ELEMENT === 1 && privateAttributesRoot_0.length === 32)) {
           __compactRuntime.typeError('createEvent',
                                      'argument 7 (argument 8 as invoked from Typescript)',
-                                     'poap.compact line 470 char 1',
+                                     'poap.compact line 480 char 1',
                                      'Bytes<32>',
                                      privateAttributesRoot_0)
         }
@@ -459,14 +460,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('deactivateEvent',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 514 char 1',
+                                     'poap.compact line 524 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('deactivateEvent',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 514 char 1',
+                                     'poap.compact line 524 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
@@ -495,14 +496,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('reactivateEvent',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 543 char 1',
+                                     'poap.compact line 553 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('reactivateEvent',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 543 char 1',
+                                     'poap.compact line 553 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
@@ -532,21 +533,21 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('claim',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 663 char 1',
+                                     'poap.compact line 673 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('claim',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 663 char 1',
+                                     'poap.compact line 673 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
         if (!(typeof(isSoulbound_0) === 'boolean')) {
           __compactRuntime.typeError('claim',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 663 char 1',
+                                     'poap.compact line 673 char 1',
                                      'Boolean',
                                      isSoulbound_0)
         }
@@ -580,35 +581,35 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('mintTo',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 722 char 1',
+                                     'poap.compact line 732 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('mintTo',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 722 char 1',
+                                     'poap.compact line 732 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
         if (!(recipientPk_0.buffer instanceof ArrayBuffer && recipientPk_0.BYTES_PER_ELEMENT === 1 && recipientPk_0.length === 32)) {
           __compactRuntime.typeError('mintTo',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 722 char 1',
+                                     'poap.compact line 732 char 1',
                                      'Bytes<32>',
                                      recipientPk_0)
         }
         if (!(tokenPrivateMetadataCommit_0.buffer instanceof ArrayBuffer && tokenPrivateMetadataCommit_0.BYTES_PER_ELEMENT === 1 && tokenPrivateMetadataCommit_0.length === 32)) {
           __compactRuntime.typeError('mintTo',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 722 char 1',
+                                     'poap.compact line 732 char 1',
                                      'Bytes<32>',
                                      tokenPrivateMetadataCommit_0)
         }
         if (!(credentialAttributesRoot_0.buffer instanceof ArrayBuffer && credentialAttributesRoot_0.BYTES_PER_ELEMENT === 1 && credentialAttributesRoot_0.length === 32)) {
           __compactRuntime.typeError('mintTo',
                                      'argument 5 (argument 6 as invoked from Typescript)',
-                                     'poap.compact line 722 char 1',
+                                     'poap.compact line 732 char 1',
                                      'Bytes<32>',
                                      credentialAttributesRoot_0)
         }
@@ -641,14 +642,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('burn',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 778 char 1',
+                                     'poap.compact line 788 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(typeof(tokenId_0) === 'bigint' && tokenId_0 >= 0n && tokenId_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('burn',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 778 char 1',
+                                     'poap.compact line 788 char 1',
                                      'Uint<0..18446744073709551616>',
                                      tokenId_0)
         }
@@ -674,7 +675,7 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('getCallerPk',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 806 char 1',
+                                     'poap.compact line 816 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
@@ -698,14 +699,14 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('getHolderPk',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 818 char 1',
+                                     'poap.compact line 828 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(issuerId_0.buffer instanceof ArrayBuffer && issuerId_0.BYTES_PER_ELEMENT === 1 && issuerId_0.length === 32)) {
           __compactRuntime.typeError('getHolderPk',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 818 char 1',
+                                     'poap.compact line 828 char 1',
                                      'Bytes<32>',
                                      issuerId_0)
         }
@@ -739,28 +740,28 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('revealPrivateMetadata',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 857 char 1',
+                                     'poap.compact line 867 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('revealPrivateMetadata',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 857 char 1',
+                                     'poap.compact line 867 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
         if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
           __compactRuntime.typeError('revealPrivateMetadata',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 857 char 1',
+                                     'poap.compact line 867 char 1',
                                      'Bytes<32>',
                                      value_0)
         }
         if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
           __compactRuntime.typeError('revealPrivateMetadata',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 857 char 1',
+                                     'poap.compact line 867 char 1',
                                      'Bytes<32>',
                                      rand_0)
         }
@@ -793,28 +794,28 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('revealPrivateTokenMetadata',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 881 char 1',
+                                     'poap.compact line 891 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(typeof(tokenId_0) === 'bigint' && tokenId_0 >= 0n && tokenId_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('revealPrivateTokenMetadata',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 881 char 1',
+                                     'poap.compact line 891 char 1',
                                      'Uint<0..18446744073709551616>',
                                      tokenId_0)
         }
         if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
           __compactRuntime.typeError('revealPrivateTokenMetadata',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 881 char 1',
+                                     'poap.compact line 891 char 1',
                                      'Bytes<32>',
                                      value_0)
         }
         if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
           __compactRuntime.typeError('revealPrivateTokenMetadata',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 881 char 1',
+                                     'poap.compact line 891 char 1',
                                      'Bytes<32>',
                                      rand_0)
         }
@@ -840,54 +841,62 @@ export class Contract {
         return { result: pureCircuits.computeAttributeLeaf(...args_1), context };
       },
       publishDisclosureRequest: (...args_1) => {
-        if (args_1.length !== 5) {
-          throw new __compactRuntime.CompactError(`publishDisclosureRequest: expected 5 arguments (as invoked from Typescript), received ${args_1.length}`);
+        if (args_1.length !== 6) {
+          throw new __compactRuntime.CompactError(`publishDisclosureRequest: expected 6 arguments (as invoked from Typescript), received ${args_1.length}`);
         }
         const contextOrig_0 = args_1[0];
         const label_0 = args_1[1];
         const eventId_0 = args_1[2];
         const fieldId_0 = args_1[3];
         const setRoot_0 = args_1[4];
+        const recipient_0 = args_1[5];
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('publishDisclosureRequest',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1015 char 1',
+                                     'poap.compact line 1037 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(label_0.buffer instanceof ArrayBuffer && label_0.BYTES_PER_ELEMENT === 1 && label_0.length === 32)) {
           __compactRuntime.typeError('publishDisclosureRequest',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1015 char 1',
+                                     'poap.compact line 1037 char 1',
                                      'Bytes<32>',
                                      label_0)
         }
         if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
           __compactRuntime.typeError('publishDisclosureRequest',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1015 char 1',
+                                     'poap.compact line 1037 char 1',
                                      'Bytes<32>',
                                      eventId_0)
         }
         if (!(fieldId_0.buffer instanceof ArrayBuffer && fieldId_0.BYTES_PER_ELEMENT === 1 && fieldId_0.length === 32)) {
           __compactRuntime.typeError('publishDisclosureRequest',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 1015 char 1',
+                                     'poap.compact line 1037 char 1',
                                      'Bytes<32>',
                                      fieldId_0)
         }
         if (!(setRoot_0.buffer instanceof ArrayBuffer && setRoot_0.BYTES_PER_ELEMENT === 1 && setRoot_0.length === 32)) {
           __compactRuntime.typeError('publishDisclosureRequest',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 1015 char 1',
+                                     'poap.compact line 1037 char 1',
                                      'Bytes<32>',
                                      setRoot_0)
+        }
+        if (!(recipient_0.buffer instanceof ArrayBuffer && recipient_0.BYTES_PER_ELEMENT === 1 && recipient_0.length === 32)) {
+          __compactRuntime.typeError('publishDisclosureRequest',
+                                     'argument 5 (argument 6 as invoked from Typescript)',
+                                     'poap.compact line 1037 char 1',
+                                     'Bytes<32>',
+                                     recipient_0)
         }
         const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
         const partialProofData = {
           input: {
-            value: _descriptor_0.toValue(label_0).concat(_descriptor_0.toValue(eventId_0).concat(_descriptor_0.toValue(fieldId_0).concat(_descriptor_0.toValue(setRoot_0)))),
-            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment())))
+            value: _descriptor_0.toValue(label_0).concat(_descriptor_0.toValue(eventId_0).concat(_descriptor_0.toValue(fieldId_0).concat(_descriptor_0.toValue(setRoot_0).concat(_descriptor_0.toValue(recipient_0))))),
+            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment()))))
           },
           output: undefined,
           publicTranscript: [],
@@ -898,7 +907,8 @@ export class Contract {
                                                           label_0,
                                                           eventId_0,
                                                           fieldId_0,
-                                                          setRoot_0);
+                                                          setRoot_0,
+                                                          recipient_0);
         partialProofData.output = { value: _descriptor_0.toValue(result_0), alignment: _descriptor_0.alignment() };
         return { result: result_0, context: context, proofData: partialProofData, gasCost: context.gasCost };
       },
@@ -915,50 +925,50 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(requestId_0.buffer instanceof ArrayBuffer && requestId_0.BYTES_PER_ELEMENT === 1 && requestId_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'Bytes<32>',
                                      requestId_0)
         }
         if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'Bytes<32>',
                                      value_0)
         }
         if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'Bytes<32>',
                                      rand_0)
         }
         if (!(typeof(attributePath_0) === 'object' && attributePath_0.leaf.buffer instanceof ArrayBuffer && attributePath_0.leaf.BYTES_PER_ELEMENT === 1 && attributePath_0.leaf.length === 32 && Array.isArray(attributePath_0.path) && attributePath_0.path.length === 8 && attributePath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<8, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      attributePath_0)
         }
         if (!(typeof(setMembershipPath_0) === 'object' && setMembershipPath_0.leaf.buffer instanceof ArrayBuffer && setMembershipPath_0.leaf.BYTES_PER_ELEMENT === 1 && setMembershipPath_0.leaf.length === 32 && Array.isArray(setMembershipPath_0.path) && setMembershipPath_0.path.length === 16 && setMembershipPath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveAttributeMembership',
                                      'argument 5 (argument 6 as invoked from Typescript)',
-                                     'poap.compact line 1068 char 1',
+                                     'poap.compact line 1094 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<16, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      setMembershipPath_0)
         }
         const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
         const partialProofData = {
           input: {
-            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_12.toValue(attributePath_0).concat(_descriptor_14.toValue(setMembershipPath_0))))),
-            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_12.alignment().concat(_descriptor_14.alignment()))))
+            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_10.toValue(attributePath_0).concat(_descriptor_12.toValue(setMembershipPath_0))))),
+            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_10.alignment().concat(_descriptor_12.alignment()))))
           },
           output: undefined,
           publicTranscript: [],
@@ -987,50 +997,50 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(requestId_0.buffer instanceof ArrayBuffer && requestId_0.BYTES_PER_ELEMENT === 1 && requestId_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'Bytes<32>',
                                      requestId_0)
         }
         if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'Bytes<32>',
                                      value_0)
         }
         if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'Bytes<32>',
                                      rand_0)
         }
         if (!(typeof(attributePath_0) === 'object' && attributePath_0.leaf.buffer instanceof ArrayBuffer && attributePath_0.leaf.BYTES_PER_ELEMENT === 1 && attributePath_0.leaf.length === 32 && Array.isArray(attributePath_0.path) && attributePath_0.path.length === 8 && attributePath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<8, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      attributePath_0)
         }
         if (!(typeof(setMembershipPath_0) === 'object' && setMembershipPath_0.leaf.buffer instanceof ArrayBuffer && setMembershipPath_0.leaf.BYTES_PER_ELEMENT === 1 && setMembershipPath_0.leaf.length === 32 && Array.isArray(setMembershipPath_0.path) && setMembershipPath_0.path.length === 16 && setMembershipPath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveAttributeMembershipOnce',
                                      'argument 5 (argument 6 as invoked from Typescript)',
-                                     'poap.compact line 1130 char 1',
+                                     'poap.compact line 1156 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<16, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      setMembershipPath_0)
         }
         const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
         const partialProofData = {
           input: {
-            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_12.toValue(attributePath_0).concat(_descriptor_14.toValue(setMembershipPath_0))))),
-            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_12.alignment().concat(_descriptor_14.alignment()))))
+            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_10.toValue(attributePath_0).concat(_descriptor_12.toValue(setMembershipPath_0))))),
+            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_10.alignment().concat(_descriptor_12.alignment()))))
           },
           output: undefined,
           publicTranscript: [],
@@ -1062,21 +1072,21 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('proveTokenOwnership',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1213 char 1',
+                                     'poap.compact line 1262 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(requestId_0.buffer instanceof ArrayBuffer && requestId_0.BYTES_PER_ELEMENT === 1 && requestId_0.length === 32)) {
           __compactRuntime.typeError('proveTokenOwnership',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1213 char 1',
+                                     'poap.compact line 1262 char 1',
                                      'Bytes<32>',
                                      requestId_0)
         }
         if (!(typeof(tokenId_0) === 'bigint' && tokenId_0 >= 0n && tokenId_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('proveTokenOwnership',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1213 char 1',
+                                     'poap.compact line 1262 char 1',
                                      'Uint<0..18446744073709551616>',
                                      tokenId_0)
         }
@@ -1108,36 +1118,36 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('proveEventAttendance',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1248 char 1',
+                                     'poap.compact line 1303 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(requestId_0.buffer instanceof ArrayBuffer && requestId_0.BYTES_PER_ELEMENT === 1 && requestId_0.length === 32)) {
           __compactRuntime.typeError('proveEventAttendance',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1248 char 1',
+                                     'poap.compact line 1303 char 1',
                                      'Bytes<32>',
                                      requestId_0)
         }
         if (!(credAttrRoot_0.buffer instanceof ArrayBuffer && credAttrRoot_0.BYTES_PER_ELEMENT === 1 && credAttrRoot_0.length === 32)) {
           __compactRuntime.typeError('proveEventAttendance',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1248 char 1',
+                                     'poap.compact line 1303 char 1',
                                      'Bytes<32>',
                                      credAttrRoot_0)
         }
         if (!(typeof(credPath_0) === 'object' && credPath_0.leaf.buffer instanceof ArrayBuffer && credPath_0.leaf.BYTES_PER_ELEMENT === 1 && credPath_0.leaf.length === 32 && Array.isArray(credPath_0.path) && credPath_0.path.length === 20 && credPath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveEventAttendance',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 1248 char 1',
+                                     'poap.compact line 1303 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<20, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      credPath_0)
         }
         const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
         const partialProofData = {
           input: {
-            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(credAttrRoot_0).concat(_descriptor_10.toValue(credPath_0))),
-            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_10.alignment()))
+            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(credAttrRoot_0).concat(_descriptor_14.toValue(credPath_0))),
+            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_14.alignment()))
           },
           output: undefined,
           publicTranscript: [],
@@ -1165,57 +1175,57 @@ export class Contract {
         if (!(typeof(contextOrig_0) === 'object' && contextOrig_0.currentQueryContext != undefined)) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 1 (as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'CircuitContext',
                                      contextOrig_0)
         }
         if (!(requestId_0.buffer instanceof ArrayBuffer && requestId_0.BYTES_PER_ELEMENT === 1 && requestId_0.length === 32)) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 1 (argument 2 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'Bytes<32>',
                                      requestId_0)
         }
         if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 2 (argument 3 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'Bytes<32>',
                                      value_0)
         }
         if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 3 (argument 4 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'Bytes<32>',
                                      rand_0)
         }
         if (!(typeof(attributePath_0) === 'object' && attributePath_0.leaf.buffer instanceof ArrayBuffer && attributePath_0.leaf.BYTES_PER_ELEMENT === 1 && attributePath_0.leaf.length === 32 && Array.isArray(attributePath_0.path) && attributePath_0.path.length === 8 && attributePath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 4 (argument 5 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<8, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      attributePath_0)
         }
         if (!(typeof(setMembershipPath_0) === 'object' && setMembershipPath_0.leaf.buffer instanceof ArrayBuffer && setMembershipPath_0.leaf.BYTES_PER_ELEMENT === 1 && setMembershipPath_0.leaf.length === 32 && Array.isArray(setMembershipPath_0.path) && setMembershipPath_0.path.length === 16 && setMembershipPath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 5 (argument 6 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<16, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      setMembershipPath_0)
         }
         if (!(typeof(credPath_0) === 'object' && credPath_0.leaf.buffer instanceof ArrayBuffer && credPath_0.leaf.BYTES_PER_ELEMENT === 1 && credPath_0.leaf.length === 32 && Array.isArray(credPath_0.path) && credPath_0.path.length === 20 && credPath_0.path.every((t) => typeof(t) === 'object' && typeof(t.sibling) === 'object' && typeof(t.sibling.field) === 'bigint' && t.sibling.field >= 0 && t.sibling.field <= __compactRuntime.MAX_FIELD && typeof(t.goes_left) === 'boolean'))) {
           __compactRuntime.typeError('proveCredentialAttribute',
                                      'argument 6 (argument 7 as invoked from Typescript)',
-                                     'poap.compact line 1294 char 1',
+                                     'poap.compact line 1360 char 1',
                                      'struct MerkleTreePath<leaf: Bytes<32>, path: Vector<20, struct MerkleTreePathEntry<sibling: struct MerkleTreeDigest<field: Field>, goes_left: Boolean>>>',
                                      credPath_0)
         }
         const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
         const partialProofData = {
           input: {
-            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_12.toValue(attributePath_0).concat(_descriptor_14.toValue(setMembershipPath_0).concat(_descriptor_10.toValue(credPath_0)))))),
-            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_12.alignment().concat(_descriptor_14.alignment().concat(_descriptor_10.alignment())))))
+            value: _descriptor_0.toValue(requestId_0).concat(_descriptor_0.toValue(value_0).concat(_descriptor_0.toValue(rand_0).concat(_descriptor_10.toValue(attributePath_0).concat(_descriptor_12.toValue(setMembershipPath_0).concat(_descriptor_14.toValue(credPath_0)))))),
+            alignment: _descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_0.alignment().concat(_descriptor_10.alignment().concat(_descriptor_12.alignment().concat(_descriptor_14.alignment())))))
           },
           output: undefined,
           publicTranscript: [],
@@ -1805,7 +1815,7 @@ export class Contract {
     if (!(result_0.buffer instanceof ArrayBuffer && result_0.BYTES_PER_ELEMENT === 1 && result_0.length === 32)) {
       __compactRuntime.typeError('local_sk',
                                  'return value',
-                                 'poap.compact line 231 char 1',
+                                 'poap.compact line 241 char 1',
                                  'Bytes<32>',
                                  result_0)
     }
@@ -1832,7 +1842,7 @@ export class Contract {
     if (!(Array.isArray(result_0) && result_0.length === 0 )) {
       __compactRuntime.typeError('store_token',
                                  'return value',
-                                 'poap.compact line 248 char 1',
+                                 'poap.compact line 258 char 1',
                                  '[]',
                                  result_0)
     }
@@ -2724,7 +2734,7 @@ export class Contract {
                           minted:
                             ((t1) => {
                               if (t1 > 18446744073709551615n) {
-                                throw new __compactRuntime.CompactError('poap.compact line 627 char 33: cast from Field or Uint value to smaller Uint value failed: ' + t1 + ' is greater than 18446744073709551615');
+                                throw new __compactRuntime.CompactError('poap.compact line 637 char 33: cast from Field or Uint value to smaller Uint value failed: ' + t1 + ' is greater than 18446744073709551615');
                               }
                               return t1;
                             })(ev_0.minted + 1n),
@@ -3433,7 +3443,8 @@ export class Contract {
                               label_0,
                               eventId_0,
                               fieldId_0,
-                              setRoot_0)
+                              setRoot_0,
+                              recipient_0)
   {
     __compactRuntime.assert(!_descriptor_2.fromValue(__compactRuntime.queryLedgerState(context,
                                                                                        partialProofData,
@@ -3455,6 +3466,7 @@ export class Contract {
     const evId_0 = eventId_0;
     const fId_0 = fieldId_0;
     const sRoot_0 = setRoot_0;
+    const rcpt_0 = recipient_0;
     __compactRuntime.assert(_descriptor_2.fromValue(__compactRuntime.queryLedgerState(context,
                                                                                       partialProofData,
                                                                                       [
@@ -3500,7 +3512,8 @@ export class Contract {
     const req_0 = { verifier: verifier_0,
                     eventId: evId_0,
                     fieldId: fId_0,
-                    setRoot: sRoot_0 };
+                    setRoot: sRoot_0,
+                    recipient: rcpt_0 };
     __compactRuntime.queryLedgerState(context,
                                       partialProofData,
                                       [
@@ -3718,6 +3731,13 @@ export class Contract {
                                        { ins: { cached: true, n: 2 } }]);
     return [];
   }
+  _assert_addressed_to_0(req_0, holderPk_0) {
+    __compactRuntime.assert(this._equal_18(req_0.recipient, new Uint8Array(32))
+                            ||
+                            this._equal_19(req_0.recipient, holderPk_0),
+                            'Request is addressed to another holder');
+    return [];
+  }
   _computeCredentialLeaf_0(eventId_0, holderPk_0, credAttrRoot_0) {
     return this._credential_leaf_0(eventId_0, holderPk_0, credAttrRoot_0);
   }
@@ -3808,7 +3828,7 @@ export class Contract {
                                                                                         { popeq: { cached: true,
                                                                                                    result: undefined } }]).value),
                             'Token burned');
-    __compactRuntime.assert(this._equal_18(_descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
+    __compactRuntime.assert(this._equal_20(_descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
                                                                                                      partialProofData,
                                                                                                      [
                                                                                                       { dup: { n: 0 } },
@@ -3831,7 +3851,30 @@ export class Contract {
                                                                                                                  result: undefined } }]).value),
                                            req_0.eventId),
                             'Token is not for the requested event');
-    __compactRuntime.assert(this._equal_19(_descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
+    const ownerPk_0 = this._holder_pk_0(context,
+                                        partialProofData,
+                                        _descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
+                                                                                                  partialProofData,
+                                                                                                  [
+                                                                                                   { dup: { n: 0 } },
+                                                                                                   { idx: { cached: false,
+                                                                                                            pushPath: false,
+                                                                                                            path: [
+                                                                                                                   { tag: 'value',
+                                                                                                                     value: { value: _descriptor_26.toValue(1n),
+                                                                                                                              alignment: _descriptor_26.alignment() } },
+                                                                                                                   { tag: 'value',
+                                                                                                                     value: { value: _descriptor_26.toValue(1n),
+                                                                                                                              alignment: _descriptor_26.alignment() } }] } },
+                                                                                                   { idx: { cached: false,
+                                                                                                            pushPath: false,
+                                                                                                            path: [
+                                                                                                                   { tag: 'value',
+                                                                                                                     value: { value: _descriptor_3.toValue(tId_0),
+                                                                                                                              alignment: _descriptor_3.alignment() } }] } },
+                                                                                                   { popeq: { cached: false,
+                                                                                                              result: undefined } }]).value));
+    __compactRuntime.assert(this._equal_21(_descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
                                                                                                      partialProofData,
                                                                                                      [
                                                                                                       { dup: { n: 0 } },
@@ -3852,30 +3895,9 @@ export class Contract {
                                                                                                                                  alignment: _descriptor_3.alignment() } }] } },
                                                                                                       { popeq: { cached: false,
                                                                                                                  result: undefined } }]).value),
-                                           this._holder_pk_0(context,
-                                                             partialProofData,
-                                                             _descriptor_0.fromValue(__compactRuntime.queryLedgerState(context,
-                                                                                                                       partialProofData,
-                                                                                                                       [
-                                                                                                                        { dup: { n: 0 } },
-                                                                                                                        { idx: { cached: false,
-                                                                                                                                 pushPath: false,
-                                                                                                                                 path: [
-                                                                                                                                        { tag: 'value',
-                                                                                                                                          value: { value: _descriptor_26.toValue(1n),
-                                                                                                                                                   alignment: _descriptor_26.alignment() } },
-                                                                                                                                        { tag: 'value',
-                                                                                                                                          value: { value: _descriptor_26.toValue(1n),
-                                                                                                                                                   alignment: _descriptor_26.alignment() } }] } },
-                                                                                                                        { idx: { cached: false,
-                                                                                                                                 pushPath: false,
-                                                                                                                                 path: [
-                                                                                                                                        { tag: 'value',
-                                                                                                                                          value: { value: _descriptor_3.toValue(tId_0),
-                                                                                                                                                   alignment: _descriptor_3.alignment() } }] } },
-                                                                                                                        { popeq: { cached: false,
-                                                                                                                                   result: undefined } }]).value))),
+                                           ownerPk_0),
                             'Not the owner');
+    this._assert_addressed_to_0(req_0, ownerPk_0);
     return [];
   }
   _proveEventAttendance_0(context,
@@ -3971,12 +3993,14 @@ export class Contract {
                                                                                                         alignment: _descriptor_0.alignment() } }] } },
                                                                              { popeq: { cached: false,
                                                                                         result: undefined } }]).value));
+    const holderPk_0 = this._holder_secret_pk_0(context,
+                                                partialProofData,
+                                                ev_0.organizer);
+    this._assert_addressed_to_0(req_0, holderPk_0);
     const leaf_0 = this._credential_leaf_0(req_0.eventId,
-                                           this._holder_secret_pk_0(context,
-                                                                    partialProofData,
-                                                                    ev_0.organizer),
+                                           holderPk_0,
                                            credAttrRoot_0);
-    __compactRuntime.assert(this._equal_20(credPath_0.leaf, leaf_0),
+    __compactRuntime.assert(this._equal_22(credPath_0.leaf, leaf_0),
                             "Path does not match this holder's credential");
     let tmp_2;
     __compactRuntime.assert((tmp_2 = this._merkleTreePathRoot_2(credPath_0),
@@ -4104,18 +4128,22 @@ export class Contract {
                                                                                                         alignment: _descriptor_0.alignment() } }] } },
                                                                              { popeq: { cached: false,
                                                                                         result: undefined } }]).value));
-    __compactRuntime.assert(this._equal_21(attributePath_0.leaf,
+    __compactRuntime.assert(!this._equal_23(req_0.recipient, new Uint8Array(32)),
+                            'Request must be addressed to a holder');
+    const holderPk_0 = this._holder_secret_pk_0(context,
+                                                partialProofData,
+                                                ev_0.organizer);
+    this._assert_addressed_to_0(req_0, holderPk_0);
+    __compactRuntime.assert(this._equal_24(attributePath_0.leaf,
                                            this._credential_attr_leaf_0(req_0.fieldId,
                                                                         value_0,
                                                                         rand_0)),
                             'Path does not match the recomputed leaf');
     const credAttrRoot_0 = this._upgradeFromTransient_0(this._merkleTreePathRoot_0(attributePath_0).field);
     const leaf_0 = this._credential_leaf_0(req_0.eventId,
-                                           this._holder_secret_pk_0(context,
-                                                                    partialProofData,
-                                                                    ev_0.organizer),
+                                           holderPk_0,
                                            credAttrRoot_0);
-    __compactRuntime.assert(this._equal_22(credPath_0.leaf, leaf_0),
+    __compactRuntime.assert(this._equal_25(credPath_0.leaf, leaf_0),
                             "Path does not match this holder's credential");
     let tmp_2;
     __compactRuntime.assert((tmp_2 = this._merkleTreePathRoot_2(credPath_0),
@@ -4145,10 +4173,10 @@ export class Contract {
                                                                                         { popeq: { cached: true,
                                                                                                    result: undefined } }]).value)),
                             'Credential not in tree');
-    __compactRuntime.assert(this._equal_23(setMembershipPath_0.leaf, value_0),
+    __compactRuntime.assert(this._equal_26(setMembershipPath_0.leaf, value_0),
                             'Set path does not match the hidden value');
     const computedSetRoot_0 = this._upgradeFromTransient_0(this._merkleTreePathRoot_1(setMembershipPath_0).field);
-    __compactRuntime.assert(this._equal_24(computedSetRoot_0, req_0.setRoot),
+    __compactRuntime.assert(this._equal_27(computedSetRoot_0, req_0.setRoot),
                             'Value is not a member of the requested set');
     return [];
   }
@@ -4264,6 +4292,18 @@ export class Contract {
     if (!x0.every((x, i) => y0[i] === x)) { return false; }
     return true;
   }
+  _equal_25(x0, y0) {
+    if (!x0.every((x, i) => y0[i] === x)) { return false; }
+    return true;
+  }
+  _equal_26(x0, y0) {
+    if (!x0.every((x, i) => y0[i] === x)) { return false; }
+    return true;
+  }
+  _equal_27(x0, y0) {
+    if (!x0.every((x, i) => y0[i] === x)) { return false; }
+    return true;
+  }
 }
 export function ledger(stateOrChargedState) {
   const state = stateOrChargedState instanceof __compactRuntime.StateValue ? stateOrChargedState : stateOrChargedState.state;
@@ -4351,7 +4391,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 91 char 1',
+                                     'poap.compact line 100 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4383,7 +4423,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 91 char 1',
+                                     'poap.compact line 100 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4472,7 +4512,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 97 char 1',
+                                     'poap.compact line 106 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4504,7 +4544,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 97 char 1',
+                                     'poap.compact line 106 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4593,7 +4633,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 101 char 1',
+                                     'poap.compact line 110 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4625,7 +4665,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 101 char 1',
+                                     'poap.compact line 110 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4714,7 +4754,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 108 char 1',
+                                     'poap.compact line 117 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4746,7 +4786,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 108 char 1',
+                                     'poap.compact line 117 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4835,7 +4875,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 116 char 1',
+                                     'poap.compact line 125 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4867,7 +4907,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 116 char 1',
+                                     'poap.compact line 125 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4956,7 +4996,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 122 char 1',
+                                     'poap.compact line 131 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -4988,7 +5028,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 122 char 1',
+                                     'poap.compact line 131 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -5077,7 +5117,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 129 char 1',
+                                     'poap.compact line 138 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5109,7 +5149,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 129 char 1',
+                                     'poap.compact line 138 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5198,7 +5238,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 135 char 1',
+                                     'poap.compact line 144 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5230,7 +5270,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 135 char 1',
+                                     'poap.compact line 144 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5319,7 +5359,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 142 char 1',
+                                     'poap.compact line 151 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5351,7 +5391,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 142 char 1',
+                                     'poap.compact line 151 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5440,7 +5480,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 147 char 1',
+                                     'poap.compact line 156 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5472,7 +5512,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 147 char 1',
+                                     'poap.compact line 156 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5561,7 +5601,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 151 char 1',
+                                     'poap.compact line 160 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -5593,7 +5633,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(key_0) === 'bigint' && key_0 >= 0n && key_0 <= 18446744073709551615n)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 151 char 1',
+                                     'poap.compact line 160 char 1',
                                      'Uint<0..18446744073709551616>',
                                      key_0)
         }
@@ -5682,7 +5722,7 @@ export function ledger(stateOrChargedState) {
         if (!(elem_0.buffer instanceof ArrayBuffer && elem_0.BYTES_PER_ELEMENT === 1 && elem_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 164 char 1',
+                                     'poap.compact line 173 char 1',
                                      'Bytes<32>',
                                      elem_0)
         }
@@ -5769,7 +5809,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('member',
                                      'argument 1',
-                                     'poap.compact line 172 char 1',
+                                     'poap.compact line 182 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5801,7 +5841,7 @@ export function ledger(stateOrChargedState) {
         if (!(key_0.buffer instanceof ArrayBuffer && key_0.BYTES_PER_ELEMENT === 1 && key_0.length === 32)) {
           __compactRuntime.typeError('lookup',
                                      'argument 1',
-                                     'poap.compact line 172 char 1',
+                                     'poap.compact line 182 char 1',
                                      'Bytes<32>',
                                      key_0)
         }
@@ -5875,7 +5915,7 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(rt_0) === 'object' && typeof(rt_0.field) === 'bigint' && rt_0.field >= 0 && rt_0.field <= __compactRuntime.MAX_FIELD)) {
           __compactRuntime.typeError('checkRoot',
                                      'argument 1',
-                                     'poap.compact line 193 char 1',
+                                     'poap.compact line 203 char 1',
                                      'struct MerkleTreeDigest<field: Field>',
                                      rt_0)
         }
@@ -5928,14 +5968,14 @@ export function ledger(stateOrChargedState) {
         if (!(typeof(index_0) === 'bigint' && index_0 >= 0 && index_0 <= __compactRuntime.MAX_FIELD)) {
           __compactRuntime.typeError('path_for_leaf',
                                      'argument 1',
-                                     'poap.compact line 193 char 1',
+                                     'poap.compact line 203 char 1',
                                      'Field',
                                      index_0)
         }
         if (!(leaf_0.buffer instanceof ArrayBuffer && leaf_0.BYTES_PER_ELEMENT === 1 && leaf_0.length === 32)) {
           __compactRuntime.typeError('path_for_leaf',
                                      'argument 2',
-                                     'poap.compact line 193 char 1',
+                                     'poap.compact line 203 char 1',
                                      'Bytes<32>',
                                      leaf_0)
         }
@@ -5950,7 +5990,7 @@ export function ledger(stateOrChargedState) {
         if (!(leaf_0.buffer instanceof ArrayBuffer && leaf_0.BYTES_PER_ELEMENT === 1 && leaf_0.length === 32)) {
           __compactRuntime.typeError('find_path_for_leaf',
                                      'argument 1',
-                                     'poap.compact line 193 char 1',
+                                     'poap.compact line 203 char 1',
                                      'Bytes<32>',
                                      leaf_0)
         }
@@ -6017,14 +6057,14 @@ export const pureCircuits = {
     if (!(organizer_0.buffer instanceof ArrayBuffer && organizer_0.BYTES_PER_ELEMENT === 1 && organizer_0.length === 32)) {
       __compactRuntime.typeError('computeEventId',
                                  'argument 1',
-                                 'poap.compact line 354 char 1',
+                                 'poap.compact line 364 char 1',
                                  'Bytes<32>',
                                  organizer_0)
     }
     if (!(label_0.buffer instanceof ArrayBuffer && label_0.BYTES_PER_ELEMENT === 1 && label_0.length === 32)) {
       __compactRuntime.typeError('computeEventId',
                                  'argument 2',
-                                 'poap.compact line 354 char 1',
+                                 'poap.compact line 364 char 1',
                                  'Bytes<32>',
                                  label_0)
     }
@@ -6039,14 +6079,14 @@ export const pureCircuits = {
     if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
       __compactRuntime.typeError('computePrivateMetadataCommit',
                                  'argument 1',
-                                 'poap.compact line 840 char 1',
+                                 'poap.compact line 850 char 1',
                                  'Bytes<32>',
                                  value_0)
     }
     if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
       __compactRuntime.typeError('computePrivateMetadataCommit',
                                  'argument 2',
-                                 'poap.compact line 840 char 1',
+                                 'poap.compact line 850 char 1',
                                  'Bytes<32>',
                                  rand_0)
     }
@@ -6063,28 +6103,28 @@ export const pureCircuits = {
     if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
       __compactRuntime.typeError('computeAttributeLeaf',
                                  'argument 1',
-                                 'poap.compact line 972 char 1',
+                                 'poap.compact line 982 char 1',
                                  'Bytes<32>',
                                  eventId_0)
     }
     if (!(fieldId_0.buffer instanceof ArrayBuffer && fieldId_0.BYTES_PER_ELEMENT === 1 && fieldId_0.length === 32)) {
       __compactRuntime.typeError('computeAttributeLeaf',
                                  'argument 2',
-                                 'poap.compact line 972 char 1',
+                                 'poap.compact line 982 char 1',
                                  'Bytes<32>',
                                  fieldId_0)
     }
     if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
       __compactRuntime.typeError('computeAttributeLeaf',
                                  'argument 3',
-                                 'poap.compact line 972 char 1',
+                                 'poap.compact line 982 char 1',
                                  'Bytes<32>',
                                  value_0)
     }
     if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
       __compactRuntime.typeError('computeAttributeLeaf',
                                  'argument 4',
-                                 'poap.compact line 972 char 1',
+                                 'poap.compact line 982 char 1',
                                  'Bytes<32>',
                                  rand_0)
     }
@@ -6103,21 +6143,21 @@ export const pureCircuits = {
     if (!(eventId_0.buffer instanceof ArrayBuffer && eventId_0.BYTES_PER_ELEMENT === 1 && eventId_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialLeaf',
                                  'argument 1',
-                                 'poap.compact line 1180 char 1',
+                                 'poap.compact line 1228 char 1',
                                  'Bytes<32>',
                                  eventId_0)
     }
     if (!(holderPk_0.buffer instanceof ArrayBuffer && holderPk_0.BYTES_PER_ELEMENT === 1 && holderPk_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialLeaf',
                                  'argument 2',
-                                 'poap.compact line 1180 char 1',
+                                 'poap.compact line 1228 char 1',
                                  'Bytes<32>',
                                  holderPk_0)
     }
     if (!(credAttrRoot_0.buffer instanceof ArrayBuffer && credAttrRoot_0.BYTES_PER_ELEMENT === 1 && credAttrRoot_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialLeaf',
                                  'argument 3',
-                                 'poap.compact line 1180 char 1',
+                                 'poap.compact line 1228 char 1',
                                  'Bytes<32>',
                                  credAttrRoot_0)
     }
@@ -6135,21 +6175,21 @@ export const pureCircuits = {
     if (!(fieldId_0.buffer instanceof ArrayBuffer && fieldId_0.BYTES_PER_ELEMENT === 1 && fieldId_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialAttrLeaf',
                                  'argument 1',
-                                 'poap.compact line 1195 char 1',
+                                 'poap.compact line 1243 char 1',
                                  'Bytes<32>',
                                  fieldId_0)
     }
     if (!(value_0.buffer instanceof ArrayBuffer && value_0.BYTES_PER_ELEMENT === 1 && value_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialAttrLeaf',
                                  'argument 2',
-                                 'poap.compact line 1195 char 1',
+                                 'poap.compact line 1243 char 1',
                                  'Bytes<32>',
                                  value_0)
     }
     if (!(rand_0.buffer instanceof ArrayBuffer && rand_0.BYTES_PER_ELEMENT === 1 && rand_0.length === 32)) {
       __compactRuntime.typeError('computeCredentialAttrLeaf',
                                  'argument 3',
-                                 'poap.compact line 1195 char 1',
+                                 'poap.compact line 1243 char 1',
                                  'Bytes<32>',
                                  rand_0)
     }

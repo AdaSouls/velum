@@ -73,6 +73,7 @@ Ledger: `disclosureRequests: Map<Bytes<32>, DisclosureRequest>` → table `discl
 | `eventId` | `event_id` | `eventId` |
 | `fieldId` | `field_id` | `fieldId` |
 | `setRoot` | `set_root` | `setRoot` |
+| `recipient` (all zeros = open request) | `recipient_pk` (`NULL` = open) | `recipientPk` (`null` = open) |
 | — (publishing transaction) | `published_block`, `published_tx` | `publishedBlock`, `publishedTx` |
 
 ## Stored but not served by the API
@@ -103,7 +104,7 @@ No server-side component can have these:
 
 - Secret keys, and the link between a holder's pseudonyms under different organizers.
 - Attribute values, their randomness, Merkle paths.
-- Which holder made an anonymous proof.
+- Which holder made an anonymous proof (one answering an open request).
 - That a stateless proof happened at all (the Velum indexer sees no state change; the chain still
   records the transaction).
 - The `isSoulbound` flag.
