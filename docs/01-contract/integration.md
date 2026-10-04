@@ -22,7 +22,7 @@ Local devnet images ([`devnet.yml`](../../devnet.yml)):
 |---|---|---|
 | Node | `midnightntwrk/midnight-node:1.0.2` | 9944 |
 | Indexer | `midnightntwrk/indexer-standalone:4.3.3` | 8088 |
-| Proof server | `midnightntwrk/proof-server:8.1.0` | 6300 |
+| Proof server | `midnightntwrk/proof-server:8.1.3` | 6300 |
 
 Install everything from the repository root. `contracts`, `scripts` and `indexer` are npm
 workspaces and must share one `node_modules`: two copies of
