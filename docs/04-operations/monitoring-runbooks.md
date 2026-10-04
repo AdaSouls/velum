@@ -136,7 +136,7 @@ Symptom: `deploy.ts` or `upgrade.ts` fails with an insufficient-funds or invalid
 |---|---|---|
 | `Wallet has no NIGHT` | The wallet is unfunded | Fund it from the network's faucet |
 | `Wallet.InsufficientFunds` | No spendable DUST yet | Wait for the DUST sync to finish; DUST accrues from registered NIGHT over time |
-| `Custom error: 170` | The DUST proof was built against a stale state | Let the wallet catch up fully, then retry. The script waits for this by default. |
+| `Custom error: 170` | The node rejected the DUST spend proof. Two known causes: the proof was built against a stale state, or the proof server is older than the network expects. | Let the wallet catch up fully, then retry; the script waits for this by default. If it still fails with the wallet at the head, compare the proof server's `/version` with the latest release: on 2026-10-04 preprod rejected every deploy attempt proved with `proof-server:8.1.0` and accepted them with `8.1.3`, which `devnet.yml` now pins. Anyone with an older container has to recreate it (`docker compose -f devnet.yml up -d proof-server` after pulling). |
 | `Custom error: 117` | A zero-fee transaction | Fixed in `scripts/lib/network.ts` by a small fixed overhead; make sure you run the current code |
 
 The first DUST sync on preprod takes 1.5–2 hours. Raise the ceiling with

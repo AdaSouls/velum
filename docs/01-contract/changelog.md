@@ -27,7 +27,12 @@ it needs an upgrade, a new deployment, or nothing.
 
   **Needs: new deployment.** The ledger layout (`DisclosureRequest`) and a circuit signature
   (`publishDisclosureRequest`) changed. New address, indexer database reset, and a frontend build
-  with the new contract artifacts. Not deployed yet.
+  with the new contract artifacts.
+
+  **On-chain (preprod):** deployed 2026-10-04, address
+  `5e303d805abf829e3595dca0402f5871490e4bc2336a65f440689c78ecd8b527`. The API host and the
+  frontend still point at the previous contract. See
+  [`deployments/preprod.md`](../../deployments/preprod.md).
 - Structured documentation tags added to the contract (`@ledger`, `@witness`, `@circuit`, …) and
   the `docs/` folder created. **Needs: nothing.** Prover and verifier keys are byte-identical to
   the previous build; only line numbers in the generated `contract/index.js` changed.

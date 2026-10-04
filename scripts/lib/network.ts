@@ -126,7 +126,7 @@ async function dustLedgerHead(indexerWS: string): Promise<bigint | undefined> {
 }
 
 // Matches devnet.yml's exposed ports (new-generation SDK devnet: node 0.22.5 /
-// indexer-standalone 4.2.1 / proof-server 8.1.0, per the official compatibility matrix
+// indexer-standalone 4.2.1 / proof-server 8.1.0, since bumped — see devnet.yml — per the official compatibility matrix
 // pairing for compact-runtime 0.16.0 / midnight-js 4.1.1 / testkit-js 4.1.1). Used only for the
 // default 'undeployed' network — every other network's config comes from testkit-js itself.
 const LOCAL_ENV_CONFIG: EnvironmentConfiguration = {
