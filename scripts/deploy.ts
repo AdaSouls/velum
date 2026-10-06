@@ -261,40 +261,37 @@ async function main() {
       signingKey: maintenanceSigningKey,
     });
 
-    logger.info('Creating demo event...');
-    const eventTx = await submitCallTx<Contract, 'createEvent'>(providers, {
-      compiledContract: CompiledPoapContract,
-      contractAddress,
-      privateStateId: PRIVATE_STATE_ID,
-      circuitId: 'createEvent',
-      // Fully public demo event — all-zero privateMetadataCommit/privateAttributesRoot
-      // means "no private part" / "no attributes committed".
-      args: [
-        DEMO_EVENT_LABEL,
-        100n,
-        0n,
-        true,
-        'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json',
-        new Uint8Array(32),
-        new Uint8Array(32),
-      ],
-    });
-    logger.info(`Event created in block ${eventTx.public.blockHeight}, tx: ${eventTx.public.txHash}`);
+    // SKIP_DEMO_EVENT=1 leaves the contract empty (0 events), as on the public preprod
+    // deployment: the demo event has no image, so it is only useful on a local devnet.
+    const skipDemoEvent = process.env['SKIP_DEMO_EVENT'] === '1';
+    let demoEventMd = '\nNo demo event: the contract was deployed empty (0 events, 0 tokens).\n';
+    let demoEventEnv = '';
+    if (!skipDemoEvent) {
+      logger.info('Creating demo event...');
+      const eventTx = await submitCallTx<Contract, 'createEvent'>(providers, {
+        compiledContract: CompiledPoapContract,
+        contractAddress,
+        privateStateId: PRIVATE_STATE_ID,
+        circuitId: 'createEvent',
+        // Fully public demo event — all-zero privateMetadataCommit/privateAttributesRoot
+        // means "no private part" / "no attributes committed".
+        args: [
+          DEMO_EVENT_LABEL,
+          100n,
+          0n,
+          true,
+          'ipfs://bafybeih6xhqqfxfyfqgw2xkjxhcxc4kdemoevent/metadata.json',
+          new Uint8Array(32),
+          new Uint8Array(32),
+        ],
+      });
+      logger.info(`Event created in block ${eventTx.public.blockHeight}, tx: ${eventTx.public.txHash}`);
 
-    // The real on-chain key — NOT DEMO_EVENT_LABEL — see derivePk/comment above.
-    const demoEventId = pureCircuits.computeEventId(derivePk(secretKey), DEMO_EVENT_LABEL);
-    const demoEventHex = Buffer.from(demoEventId).toString('hex');
-    const deploymentMd = `# Deployment Record
-
-## POAP Contract — Midnight ${targetNetwork}
-
-| Field | Value |
-|---|---|
-| Contract Address | \`${contractAddress}\` |
-| Deploy Tx Hash | \`${deployTxHash}\` |
-| Network | ${targetNetwork} |
-| Deployed | ${new Date().toISOString()} |
-
+      // The real on-chain key — NOT DEMO_EVENT_LABEL — see derivePk/comment above.
+      const demoEventId = pureCircuits.computeEventId(derivePk(secretKey), DEMO_EVENT_LABEL);
+      const demoEventHex = Buffer.from(demoEventId).toString('hex');
+      demoEventEnv = `DEMO_EVENT_ID=${demoEventHex}\n`;
+      demoEventMd = `
 ## Demo Event
 
 | Field | Value |
@@ -307,6 +304,21 @@ async function main() {
 | Create Tx Hash | \`${eventTx.public.txHash}\` |
 | Block Height | ${eventTx.public.blockHeight} |
 `;
+    } else {
+      logger.info('SKIP_DEMO_EVENT=1: not creating the demo event.');
+    }
+
+    const deploymentMd = `# Deployment Record
+
+## POAP Contract — Midnight ${targetNetwork}
+
+| Field | Value |
+|---|---|
+| Contract Address | \`${contractAddress}\` |
+| Deploy Tx Hash | \`${deployTxHash}\` |
+| Network | ${targetNetwork} |
+| Deployed | ${new Date().toISOString()} |
+${demoEventMd}`;
 
     // 'undeployed' keeps the original unsuffixed .env filename so the existing local workflow and
     // anything a developer has already scripted around it don't change.
@@ -324,8 +336,7 @@ MIDNIGHT_INDEXER_URL=${envConfig.indexer}
 MIDNIGHT_INDEXER_WS=${envConfig.indexerWS}
 MIDNIGHT_PROOF_SERVER_URL=${envConfig.proofServer}
 CONTRACT_ADDRESS=${contractAddress}
-DEMO_EVENT_ID=${demoEventHex}
-ADMIN_SEED=${seedHex}
+${demoEventEnv}ADMIN_SEED=${seedHex}
 `;
     fs.writeFileSync(path.join(CONTRACTS_DIR, '..', envFileName), envContent);
     logger.info(`Saved to ${envFileName}`);
