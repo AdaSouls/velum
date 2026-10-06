@@ -50,6 +50,7 @@ Processing the same action twice leaves the database unchanged.
 |---|---|
 | Inserts (events, tokens, requests, nullifiers) | `ON CONFLICT DO NOTHING` on the primary key |
 | Issuer upserts | `ON CONFLICT DO UPDATE` sets absolute values; block and transaction columns keep their first value (`COALESCE`) |
+| Credential update request upserts and closures | `ON CONFLICT DO UPDATE` and `UPDATE` set absolute values (`status`, commitment, block and transaction) taken from the action |
 | Updates (`minted`, `is_active`, `is_burned`, block/tx columns) | They set absolute values taken from the state, not increments |
 | Cursor | Overwrites the single row |
 
@@ -125,7 +126,7 @@ docker compose logs -f indexer      # watch the replay
 docker compose -f devnet.yml down -v       # wipes the devnet and the indexer database
 # or, to keep the chain and reset only the indexer's tables:
 psql postgresql://poap:poap@localhost:5434/poap_indexer -c \
-  "TRUNCATE tokens, events, issuers, disclosure_requests, disclosure_nullifiers, indexer_cursor CASCADE;
+  "TRUNCATE credential_update_requests, tokens, events, issuers, disclosure_requests, disclosure_nullifiers, indexer_cursor CASCADE;
    INSERT INTO indexer_cursor (id) VALUES (1);"
 ```
 

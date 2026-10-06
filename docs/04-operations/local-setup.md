@@ -28,7 +28,7 @@ npm install
 cd contracts
 npm run compact          # full build with keys, a few minutes
 npm run compact:shell    # the circuit-less build used by the deploy script
-npm test                 # 125 contract tests, no network needed
+npm test                 # 136 contract tests, no network needed
 cd ..
 ```
 
@@ -59,8 +59,8 @@ npx tsx scripts/deploy.ts
 ```
 
 On the devnet this uses the pre-funded genesis wallet, so no seed is needed, and it finishes in
-a few minutes. It deploys the shell, inserts the 18 verifier keys one by one, and creates a demo
-event. It writes:
+a few minutes. It deploys the shell, inserts the 20 verifier keys one by one, and creates a demo
+event (skip it with `SKIP_DEMO_EVENT=1`). It writes:
 
 - `deployments/undeployed.md`: the address and the demo event id
 - `.env.local`: the same, plus the endpoints and the admin seed
@@ -78,6 +78,9 @@ Expected output:
 
 ```
 [db] applied 001_init.sql
+[db] applied 002_uint64_columns.sql
+[db] applied 003_disclosure_request_recipient.sql
+[db] applied 004_credential_update_requests.sql
 [api] listening on http://localhost:3001
 [sub] resuming from block 0
 [gql-ws] connected

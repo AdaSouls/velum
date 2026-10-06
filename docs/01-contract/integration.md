@@ -191,7 +191,7 @@ Give an organizer `holderPk` for their issuer id, never `callerPk`.
 
 ### Pure helpers
 
-The five pure circuits need no context and no network:
+The six pure circuits need no context and no network:
 
 ```ts
 import { pureCircuits } from './managed/poap/contract/index.js';
@@ -199,7 +199,14 @@ import { pureCircuits } from './managed/poap/contract/index.js';
 const eventId = pureCircuits.computeEventId(organizerPk, label);
 const commit  = pureCircuits.computePrivateMetadataCommit(value, rand);
 const leaf    = pureCircuits.computeAttributeLeaf(eventId, fieldId, value, rand);
+
+// Identity attribute: text inputs right-padded to 32 bytes, salt = 32 random bytes (non-zero).
+const idValue = pureCircuits.computeIdentityValue(pad32('ARG'), pad32('national_id'), pad32('12345678'), salt);
 ```
+
+The other two are `computeCredentialAttrLeaf` and `computeCredentialLeaf`. How the identity
+inputs must be normalized is in
+[flow 12](circuits.md#12-tie-a-credential-to-identity-documents).
 
 ## Running circuits without a network
 
@@ -301,7 +308,8 @@ const view = ledger(ContractState.deserialize(state.serialize()).data);
 view.events.lookup(eventId);
 ```
 
-For application queries (events, tokens by owner, disclosure requests), use Velum's own indexer
+For application queries (events, tokens by owner, disclosure requests, credential update
+requests), use Velum's own indexer
 REST API in [`indexer/`](../../indexer/) instead of walking the ledger.
 
 ### Building Merkle paths
@@ -333,20 +341,21 @@ MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed> npx tsx scripts/deplo
 | `MN_TEST_ENVIRONMENT` | `undeployed` (default, local devnet), `preprod`, `preview`, `qanet`. Network URLs come from `testkit-js`. |
 | `MN_TEST_WALLET_SEED` | Hex seed of a funded wallet. Required off the local devnet, where a pre-funded genesis wallet is used. Get an address to fund with [`scripts/wallet-info.ts`](../../scripts/wallet-info.ts). |
 | `DUST_SYNC_TIMEOUT_MIN` | How long to wait for the wallet's DUST sync (default 180) |
+| `SKIP_DEMO_EVENT` | Set to `1` to leave the contract empty (no demo event). Used for the public preprod deployment. |
 
 What the script does:
 
 1. Builds the wallet, registers its NIGHT for DUST generation if needed, and waits until it can
    pay fees. On preprod the first run replays the network's whole DUST history, which took
    1.5–2 hours. Progress is saved to `.wallet-state/`, so later runs only catch up.
-2. **Deploys the shell build.** A deployment carrying all 18 verifier keys is rejected by the
+2. **Deploys the shell build.** A deployment carrying all 20 verifier keys is rejected by the
    node for exceeding the block weight limit, so the script deploys the circuit-less shell first.
 3. **Inserts each circuit's verifier key** in its own transaction, signed by the contract's
    maintenance authority. If the run is interrupted here, finish it with
    `scripts/upgrade.ts --apply` against the same address (it inserts the missing circuits);
    running `deploy.ts` again would deploy a new shell.
 4. Checks the result against the full build with `findDeployedContract`.
-5. Creates a demo event.
+5. Creates a demo event, unless `SKIP_DEMO_EVENT=1`.
 6. Writes `deployments/<network>.md` and `.env.<network>.local` (`.env.local` for the devnet).
    The env file contains the admin seed and is gitignored.
 
@@ -391,7 +400,7 @@ The indexer database needs no reset. See
 
 | Network | Contract address | Record |
 |---|---|---|
-| Preprod | `3ce0a48228880fa377d22d364a1ad19fee5cb6e26a8ed80de11d7ab07433ceef` | [`deployments/preprod.md`](../../deployments/preprod.md) |
+| Preprod | `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a` | [`deployments/preprod.md`](../../deployments/preprod.md) |
 | Local devnet | Written by `deploy.ts` on each run | `deployments/undeployed.md` (not committed) |
 
 The deployment record is the source of truth; check it before relying on the address above.

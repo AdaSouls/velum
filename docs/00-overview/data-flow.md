@@ -84,7 +84,9 @@ The same applies to `proveTokenOwnership`, `proveCredentialAttribute` and
 |---|---|---|---|
 | `createEvent` | new `events` entry | new `events` row (and an `issuers` row if missing) | `/api/events` |
 | `claim`, `mintTo` | new token entries, `minted` + 1 | new `tokens` row, `events.minted` | `/api/tokens/…`, `/api/events/…` |
-| `burn` | new `burnedTokens` entry | `tokens.is_burned` | `isBurned` on the token |
+| `burn` | new `burnedTokens` entry; the token's pending update request, if any, is removed | `tokens.is_burned`; `credential_update_requests.status = 'burned'` | `isBurned` on the token; `status` on the update request |
+| `requestCredentialUpdate` | new or replaced `credentialUpdateRequests` entry | `credential_update_requests` row, `status = 'pending'` | `/api/credential-update-requests` |
+| `dismissCredentialUpdate` | `credentialUpdateRequests` entry removed | `credential_update_requests.status = 'dismissed'` | `status` on the update request |
 | `deactivateEvent` | `isActive = false` | `events.is_active`, `deactivated_block` | `isActive` on the event |
 | `publishDisclosureRequest` | new `disclosureRequests` entry | new `disclosure_requests` row | `/api/disclosure-requests` |
 | `registerIssuer`, `deactivateIssuer` | `issuers` entry | `issuers` row | not exposed |

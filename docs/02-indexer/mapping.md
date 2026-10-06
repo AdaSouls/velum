@@ -97,8 +97,9 @@ always exists first.
 ### Order within one action
 
 `applyStateDiff` runs the handlers in this order inside one database transaction: issuers →
-events → tokens → nullifiers → disclosure requests. The order satisfies the foreign keys (an
-event needs its issuer, a token and a request need their event). If any handler throws, the
+events → tokens → nullifiers → disclosure requests → credential update requests. The order
+satisfies the foreign keys (an event needs its issuer, a token and a disclosure request need
+their event, an update request needs its token). If any handler throws, the
 whole transaction rolls back.
 
 ## Type rules
@@ -137,12 +138,15 @@ An entry counts as "updated" when the comparison function says it changed:
 |---|---|
 | `events` | `isActive`, `minted`, `maxSupply`, `expiration`, `isPublicMint`, `metadataURI`, `organizer`, `privateAttributesRoot` (not `privateMetadataCommit`) |
 | `issuers` | `isActive`, `organizerPk` |
-| `disclosureRequests` | all four fields (they never change in practice) |
+| `disclosureRequests` | every field (they never change in practice) |
+| `credentialUpdateRequests` | the commitment: a holder filing again replaces it |
 | `tokenOwner` | only additions are used |
 | `burnedTokens` | only additions are used |
 
-Removed entries are computed but ignored: nothing in the indexed fields is ever removed by the
-contract.
+Removed entries are used for one field only: `credentialUpdateRequests`, where a removal closes
+the request (`dismissed`, or `burned` if the token is in `burnedTokens` in the same state). For
+every other field they are computed and ignored, because the contract never removes anything
+else that is indexed.
 
 ## Known gaps and bugs
 

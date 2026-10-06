@@ -186,7 +186,7 @@ Environment variables (Production):
 Required change in `poap-frontend` before this works: `src/midnight/providers.ts` builds the
 ZK artifact URL from `window.location.origin` + `/midnight/poap`. Make the base configurable
 (e.g. `REACT_APP_MIDNIGHT_ZK_CONFIG_URL=https://$API_DOMAIN/zk/poap`) so it fetches from this
-server — its committed `public/midnight/poap/` copy only has 11 of the contract's 18 circuits.
+server — its committed `public/midnight/poap/` copy only has 11 of the contract's 20 circuits.
 The frontend's SPA routes (e.g. `/share/...`) also need a Vercel rewrite to `index.html`.
 
 ## Proof server (open decision)
