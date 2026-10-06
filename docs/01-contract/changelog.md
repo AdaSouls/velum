@@ -12,6 +12,31 @@ it needs an upgrade, a new deployment, or nothing.
 
 ## Unreleased
 
+- **Identity documents and credential update requests.** Lets a verifier make sure a credential
+  belongs to the person they checked, not to a friend who lent their key, and lets a holder ask
+  for a credential to be re-issued when one of its documents changes.
+  - New pure helper `computeIdentityValue(country, docType, number, salt)`: the attribute value
+    that ties a credential to one identity document (`H("velum:identity:v1:", …)`). Stored as an
+    ordinary credential attribute, one per document, each under its own `fieldId`; all optional.
+    A verifier proves it with the existing `proveCredentialAttribute`, against an addressed
+    request whose set is the one value rebuilt from the document they checked. Rejects an
+    all-zero salt.
+  - New ledger field `credentialUpdateRequests: Map<Uint<64>, Bytes<32>>` (tokenId → commitment
+    to the off-chain request).
+  - New circuit `requestCredentialUpdate(tokenId, payloadCommit)`: the token's holder files or
+    replaces a request.
+  - New circuit `dismissCredentialUpdate(tokenId)`: the token's issuer or the admin closes it
+    without re-issuing.
+  - `burn` also removes the token's pending request. Re-issuing is `burn` + `mintTo`, as before.
+  - Indexer: new table `credential_update_requests` (migration `004`); API: new
+    `/api/credential-update-requests` with `?issuerPk=`, `?ownerPk=`, `?status=` filters.
+  - `scripts/deploy.ts`: the two new circuits added to `PROOF_CIRCUIT_IDS`.
+
+  **Needs: new deployment.** New ledger field and two new circuits. Every circuit's keys change:
+  the compiler lays the ledger out again when a field is added, whatever its position. New
+  address, indexer database reset, and a frontend build with the new contract artifacts, zkir
+  and keys (all 20 circuits). Not deployed yet.
+
 - **Addressed disclosure requests.** `DisclosureRequest` gains a `recipient` field and
   `publishDisclosureRequest` a `recipient` argument: the holder pseudonym (`getHolderPk`) that
   must answer, or all zeros for an open request.

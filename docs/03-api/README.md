@@ -90,7 +90,8 @@ Things to know:
   |---|---|
   | `GET /api/events` | `issuerPk` |
   | `GET /api/events/:eventId/tokens` | `includeBurned=false` |
-  | `GET /api/disclosure-requests` | `verifierPk` |
+  | `GET /api/disclosure-requests` | `verifierPk`, `recipientPk` |
+  | `GET /api/credential-update-requests` | `issuerPk`, `ownerPk`, `status` |
 
 - Order is fixed per endpoint and cannot be changed:
 
@@ -199,7 +200,7 @@ tie pseudonyms together.
 | HTTP caching | Express adds a weak `ETag`. A request with `If-None-Match` gets `304 Not Modified` when the body is unchanged, but the query still runs. No `Cache-Control` header is sent on API responses. |
 | Static ZK artifacts (`/zk/*`) | `Cache-Control: public, max-age=3600` |
 | Compression | Caddy compresses responses (zstd, gzip) |
-| Response size | Unbounded on list endpoints: `GET /api/events`, `GET /api/disclosure-requests`, `GET /api/events/:eventId/tokens` |
+| Response size | Unbounded on list endpoints: `GET /api/events`, `GET /api/disclosure-requests`, `GET /api/credential-update-requests`, `GET /api/events/:eventId/tokens` |
 | Query limits | None: no row limit, no statement timeout, no request timeout |
 | Indexed lookups | All filters and joins used by the endpoints are backed by an index; see [Data model](../02-indexer/data-model.md#indexes) |
 

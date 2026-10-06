@@ -97,8 +97,12 @@ Metadata that leaks by design or that the contract cannot prevent.
 7. **Self-burn versus revocation is visible.**
 8. **Small accepted sets disclose the value.** The contract cannot enforce a minimum set size.
 9. **Credentials can be lent or relayed.** An open request can be answered by any holder of the
-   event. An addressed request can only be answered with the recipient's secret key, but someone
-   who shares that key cannot be stopped cryptographically.
+   event. An addressed request can only be answered with the recipient's secret key, but nothing
+   ties that pseudonym to a person: someone can hand a verifier a qualifying friend's pseudonym
+   and have the friend answer. The mitigation is an identity attribute
+   (`computeIdentityValue`, [flow 12](circuits.md#12-tie-a-credential-to-identity-documents)),
+   which only helps if the issuer checked the document before issuing and the verifier checks
+   the person's.
 10. **The fee payer is outside the contract's control.** Transactions are paid for by a wallet.
     Whether fee payment links a user's transactions to each other or to their wallet has not
     been analysed in this repository; do not assume it does not.
@@ -109,6 +113,8 @@ Metadata that leaks by design or that the contract cannot prevent.
 13. **Addressed requests are not anonymous.** The recipient's pseudonym is on the ledger, and a
     successful answer shows that pseudonym answered. Every proof about a credential's private
     attribute is addressed.
+14. **Credential update requests are visible.** Anyone can see that a token's holder asked its
+    issuer for an update, and when. What changed stays off-chain.
 
 ## Known issues and open items
 

@@ -18,6 +18,8 @@ Examples use the preprod deployment.
 | [`GET /api/tokens/:tokenId/attendance`](#get-apitokenstokenidattendance) | Removed (`410`) |
 | [`GET /api/disclosure-requests`](#get-apidisclosure-requests) | List disclosure requests |
 | [`GET /api/disclosure-requests/:requestId`](#get-apidisclosure-requestsrequestid) | One disclosure request |
+| [`GET /api/credential-update-requests`](#get-apicredential-update-requests) | List credential update requests |
+| [`GET /api/credential-update-requests/:tokenId`](#get-apicredential-update-requeststokenid) | A token's update request |
 
 ---
 
@@ -80,6 +82,25 @@ Use `tokenMetadataURI` to render the credential; `metadataURI` is the event's, f
 
 A request carries only the root of the accepted set. The set's members are shared by the
 verifier outside this API.
+
+### Credential update request
+
+| API field | Type | Database column | Ledger origin |
+|---|---|---|---|
+| `tokenId` | number | `credential_update_requests.token_id` | key of `credentialUpdateRequests` |
+| `ownerPk` | hex string | `tokens.owner_pk` | `tokenOwner[tokenId]`: the holder who filed it |
+| `issuerPk` | hex string | `tokens.issuer_pk` | `tokenIssuer[tokenId]`: who should act on it |
+| `eventId` | hex string | `tokens.first_event_id` | `tokenEvent[tokenId]` |
+| `payloadCommit` | hex string | `credential_update_requests.payload_commit` | `credentialUpdateRequests[tokenId]`: commitment to the off-chain request |
+| `status` | `"pending"`, `"dismissed"` or `"burned"` | `credential_update_requests.status` | `pending` while on the ledger; `dismissed` after `dismissCredentialUpdate`; `burned` after `burn` (a re-issue, a revocation or a self-burn) |
+| `requestedBlock` | number or `null` | `credential_update_requests.requested_block` | block of the latest `requestCredentialUpdate` |
+| `requestedTx` | string or `null` | `credential_update_requests.requested_tx` | hash of that transaction |
+| `closedBlock` | number or `null` | `credential_update_requests.closed_block` | block that removed it; `null` while pending |
+| `closedTx` | string or `null` | `credential_update_requests.closed_tx` | hash of that transaction |
+
+The request's content (which document, the new data) never reaches the chain or this API: the
+holder sends it to the issuer off-chain, encrypted, and the issuer checks it against
+`payloadCommit`.
 
 ---
 
@@ -329,6 +350,46 @@ One disclosure request. A holder's client reads this to learn what it is being a
 ```bash
 curl https://velum-api.adasouls.io/api/disclosure-requests/22d45167fa682ed88d8bc7aa86ddf7d18b0dfca33248100d67a5f9cc7cbca533
 ```
+
+---
+
+## `GET /api/credential-update-requests`
+
+Credential update requests, by request block ascending. Not paginated. An issuer's tooling lists
+its pending ones; a holder's wallet checks its own.
+
+| Parameter | In | Required | Description |
+|---|---|---|---|
+| `issuerPk` | query | no | Only requests for tokens of this issuer |
+| `ownerPk` | query | no | Only requests filed by this holder pseudonym |
+| `status` | query | no | `pending`, `dismissed` or `burned` |
+
+| Status | Body |
+|---|---|
+| `200` | Array of [Credential update request](#credential-update-request). `[]` if none. |
+| `400` | `{"error":"status must be one of pending, dismissed, burned"}` |
+| `500` | `{"error":"internal server error"}` |
+
+```bash
+curl "https://velum-api.adasouls.io/api/credential-update-requests?issuerPk=<issuer pk>&status=pending"
+```
+
+---
+
+## `GET /api/credential-update-requests/:tokenId`
+
+A token's latest update request.
+
+| Parameter | In | Required | Description |
+|---|---|---|---|
+| `tokenId` | path | yes | Token id, a non-negative integer |
+
+| Status | Body |
+|---|---|
+| `200` | [Credential update request](#credential-update-request) |
+| `400` | `{"error":"invalid tokenId"}` |
+| `404` | `{"error":"update request not found"}`: the token's holder never filed one |
+| `500` | `{"error":"internal server error"}` |
 
 ---
 

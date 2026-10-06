@@ -34,6 +34,7 @@ import type { LedgerView, EventRecord, IssuerRecord, DisclosureRequest } from '.
 import { eventsRouter } from './api/routes/events.js';
 import { tokensRouter } from './api/routes/tokens.js';
 import { disclosuresRouter } from './api/routes/disclosures.js';
+import { updateRequestsRouter } from './api/routes/update-requests.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ function emptyLedger(): LedgerView {
     burnedTokens:    [],
     usedDisclosures: [],
     disclosureRequests: [],
+    credentialUpdateRequests: [],
     isPaused:        false,
     adminPk:         new Uint8Array(32),
   };
@@ -159,6 +161,15 @@ function withBurn(base: LedgerView, tokenId: bigint): LedgerView {
   };
 }
 
+// requestCredentialUpdate files or replaces; dismissCredentialUpdate and burn remove.
+function withUpdateRequest(base: LedgerView, tokenId: bigint, payloadCommit: Uint8Array | null): LedgerView {
+  const others = (base.credentialUpdateRequests as Array<[bigint, Uint8Array]>).filter(([id]) => id !== tokenId);
+  return {
+    ...base,
+    credentialUpdateRequests: payloadCommit ? [...others, [tokenId, payloadCommit]] : others,
+  };
+}
+
 // ── Shared fixtures ────────────────────────────────────────────────────────────
 
 const ADMIN_PK  = bytes(0xaa);
@@ -206,6 +217,7 @@ beforeAll(async () => {
   app.use('/api/events', eventsRouter(pool));
   app.use('/api/tokens', tokensRouter(pool));
   app.use('/api/disclosure-requests', disclosuresRouter(pool));
+  app.use('/api/credential-update-requests', updateRequestsRouter(pool));
 
   server = createServer(app);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -594,6 +606,55 @@ describe('POAP indexer — component integration', () => {
 
     const one = await (await fetch(`${apiBase}/api/disclosure-requests/${hex(REQ_ADDRESSED)}`)).json() as any;
     expect(one.recipientPk).toBe(hex(USER1_PK));
+  });
+
+  it('credential update requests: filed, replaced, dismissed, re-filed, closed by a burn; filters work', async () => {
+    if (!pool) return;
+
+    const COMMIT_1 = bytes(0xc1);
+    const COMMIT_2 = bytes(0xc2);
+    const s0 = emptyLedger();
+    const s1 = withEvent(s0, EVENT_A, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', s0, s1, { txHash: '0xee01', blockHeight: 1n });
+    const s2 = withToken(withToken(s1, 0n, USER1_PK, ADMIN_PK, EVENT_A), 1n, USER2_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'mintTo', s1, s2, { txHash: '0xee02', blockHeight: 2n });
+
+    const s3 = withUpdateRequest(s2, 0n, COMMIT_1);
+    await applyStateDiff(pool, 'requestCredentialUpdate', s2, s3, { txHash: '0xee03', blockHeight: 3n });
+    const s4 = withUpdateRequest(s3, 0n, COMMIT_2);
+    await applyStateDiff(pool, 'requestCredentialUpdate', s3, s4, { txHash: '0xee04', blockHeight: 4n });
+    let one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
+    expect(one).toMatchObject({
+      tokenId: 0, ownerPk: hex(USER1_PK), issuerPk: hex(ADMIN_PK), eventId: hex(EVENT_A),
+      payloadCommit: hex(COMMIT_2), status: 'pending', requestedBlock: 4, closedBlock: null,
+    });
+
+    const s5 = withUpdateRequest(s4, 0n, null);
+    await applyStateDiff(pool, 'dismissCredentialUpdate', s4, s5, { txHash: '0xee05', blockHeight: 5n });
+    one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
+    expect(one).toMatchObject({ status: 'dismissed', closedBlock: 5, closedTx: '0xee05' });
+
+    // Filed again after the dismissal: the same row reopens.
+    const s6 = withUpdateRequest(s5, 0n, COMMIT_1);
+    await applyStateDiff(pool, 'requestCredentialUpdate', s5, s6, { txHash: '0xee06', blockHeight: 6n });
+    const s7 = withUpdateRequest(s6, 1n, COMMIT_1);
+    await applyStateDiff(pool, 'requestCredentialUpdate', s6, s7, { txHash: '0xee07', blockHeight: 7n });
+    one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
+    expect(one).toMatchObject({ status: 'pending', requestedBlock: 6, closedBlock: null, closedTx: null });
+
+    // Re-issue: the issuer burns token 0, which clears its request in the same transaction.
+    const s8 = withUpdateRequest(withBurn(s7, 0n), 0n, null);
+    await applyStateDiff(pool, 'burn', s7, s8, { txHash: '0xee08', blockHeight: 8n });
+    one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
+    expect(one).toMatchObject({ status: 'burned', closedBlock: 8 });
+
+    const pending = await (await fetch(`${apiBase}/api/credential-update-requests?issuerPk=${hex(ADMIN_PK)}&status=pending`)).json() as any[];
+    expect(pending.map((r) => r.tokenId)).toEqual([1]);
+    const mine = await (await fetch(`${apiBase}/api/credential-update-requests?ownerPk=${hex(USER1_PK)}`)).json() as any[];
+    expect(mine.map((r) => [r.tokenId, r.status])).toEqual([[0, 'burned']]);
+
+    expect((await fetch(`${apiBase}/api/credential-update-requests?status=nope`)).status).toBe(400);
+    expect((await fetch(`${apiBase}/api/credential-update-requests/9`)).status).toBe(404);
   });
 
   it('reactivateEvent → event is active again and its deactivation is cleared', async () => {

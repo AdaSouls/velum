@@ -40,6 +40,7 @@ Data lives in one of four places:
 | Credential tree: leaf hashes and roots | `credentials` | See [below](#the-credentials-tree) |
 | Disclosure requests: verifier's public key, event, field id, set root, recipient pseudonym (if addressed) | `disclosureRequests` | Anyone can see what verifiers ask, and of whom when a request is addressed |
 | Single-use nullifiers | `usedDisclosures` | Not linkable to a wallet |
+| Pending credential update requests: token id, commitment to the off-chain request | `credentialUpdateRequests` | Anyone can see that a token's holder asked its issuer for an update; the content (which document, the new number) is off-chain, encrypted to the issuer |
 | Revealed metadata digests | `eventRevealedMetadata`, `tokenRevealedMetadata` | Public once revealed, permanently |
 
 ### Private state (user's device)

@@ -58,6 +58,11 @@ export type ImpureCircuits<PS> = {
          tokenPrivateMetadataCommit_0: Uint8Array,
          credentialAttributesRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   burn(context: __compactRuntime.CircuitContext<PS>, tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  requestCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint,
+                          payloadCommit_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  dismissCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
   getCallerPk(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, Uint8Array>;
   getHolderPk(context: __compactRuntime.CircuitContext<PS>,
               issuerId_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
@@ -168,6 +173,11 @@ export type ProvableCircuits<PS> = {
          tokenPrivateMetadataCommit_0: Uint8Array,
          credentialAttributesRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   burn(context: __compactRuntime.CircuitContext<PS>, tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  requestCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint,
+                          payloadCommit_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  dismissCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
   revealPrivateMetadata(context: __compactRuntime.CircuitContext<PS>,
                         eventId_0: Uint8Array,
                         value_0: Uint8Array,
@@ -259,6 +269,10 @@ export type PureCircuits = {
   computeCredentialAttrLeaf(fieldId_0: Uint8Array,
                             value_0: Uint8Array,
                             rand_0: Uint8Array): Uint8Array;
+  computeIdentityValue(country_0: Uint8Array,
+                       docType_0: Uint8Array,
+                       number_0: Uint8Array,
+                       salt_0: Uint8Array): Uint8Array;
 }
 
 export type Circuits<PS> = {
@@ -293,6 +307,11 @@ export type Circuits<PS> = {
          tokenPrivateMetadataCommit_0: Uint8Array,
          credentialAttributesRoot_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
   burn(context: __compactRuntime.CircuitContext<PS>, tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  requestCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint,
+                          payloadCommit_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  dismissCredentialUpdate(context: __compactRuntime.CircuitContext<PS>,
+                          tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
   getCallerPk(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, Uint8Array>;
   getHolderPk(context: __compactRuntime.CircuitContext<PS>,
               issuerId_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
@@ -357,6 +376,11 @@ export type Circuits<PS> = {
                             fieldId_0: Uint8Array,
                             value_0: Uint8Array,
                             rand_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  computeIdentityValue(context: __compactRuntime.CircuitContext<PS>,
+                       country_0: Uint8Array,
+                       docType_0: Uint8Array,
+                       number_0: Uint8Array,
+                       salt_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   proveTokenOwnership(context: __compactRuntime.CircuitContext<PS>,
                       requestId_0: Uint8Array,
                       tokenId_0: bigint): __compactRuntime.CircuitResults<PS, []>;
@@ -490,6 +514,13 @@ export type Ledger = {
     pathForLeaf(index_0: bigint, leaf_0: Uint8Array): __compactRuntime.MerkleTreePath<Uint8Array>;
     findPathForLeaf(leaf_0: Uint8Array): __compactRuntime.MerkleTreePath<Uint8Array> | undefined;
     history(): Iterator<__compactRuntime.MerkleTreeDigest>
+  };
+  credentialUpdateRequests: {
+    isEmpty(): boolean;
+    size(): bigint;
+    member(key_0: bigint): boolean;
+    lookup(key_0: bigint): Uint8Array;
+    [Symbol.iterator](): Iterator<[bigint, Uint8Array]>
   };
   readonly isPaused: boolean;
   readonly adminPk: Uint8Array;

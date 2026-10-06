@@ -2,7 +2,8 @@
 
 The schema is in [`indexer/db/migrations/`](../../indexer/db/migrations/): `001_init.sql`
 creates the tables, `002_uint64_columns.sql` widens three columns and
-`003_disclosure_request_recipient.sql` adds `disclosure_requests.recipient_pk`. Every file is applied on
+`003_disclosure_request_recipient.sql` adds `disclosure_requests.recipient_pk` and
+`004_credential_update_requests.sql` adds `credential_update_requests`. Every file is applied on
 every start, in name order, and is safe to run repeatedly.
 
 Production runs Postgres 16; the local devnet runs Postgres 15.
@@ -15,6 +16,7 @@ erDiagram
     issuers ||--o{ tokens : "issuer_pk"
     events  ||--o{ tokens : "first_event_id"
     events  ||--o{ disclosure_requests : "event_id"
+    tokens  ||--o| credential_update_requests : "token_id"
 
     issuers {
         text issuer_pk PK
@@ -61,8 +63,19 @@ erDiagram
         text event_id FK
         text field_id
         text set_root
+        text recipient_pk
         bigint published_block
         text published_tx
+        timestamptz created_at
+    }
+    credential_update_requests {
+        bigint token_id PK
+        text payload_commit
+        text status
+        bigint requested_block
+        text requested_tx
+        bigint closed_block
+        text closed_tx
         timestamptz created_at
     }
     disclosure_nullifiers {
@@ -150,6 +163,21 @@ Immutable once inserted.
 | `published_block`, `published_tx` | `BIGINT`, `TEXT` | Publishing transaction | tx |
 | `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
 
+### `credential_update_requests`
+
+One row per token whose holder ever asked for an update (`requestCredentialUpdate`). The ledger
+only keeps pending requests; this table also records how each one was closed. Filing again after a
+dismissal reopens the same row.
+
+| Column | Type | Meaning | Source |
+|---|---|---|---|
+| `token_id` | `BIGINT` PK, FK → `tokens` | The token to update | key of `credentialUpdateRequests` |
+| `payload_commit` | `TEXT` | Commitment to the off-chain request, hex | `credentialUpdateRequests[id]` |
+| `status` | `TEXT` | `pending` (on the ledger), `dismissed` (`dismissCredentialUpdate`) or `burned` (removed by `burn`: a re-issue, a revocation or a self-burn) | presence in `credentialUpdateRequests`, and in `burnedTokens` when removed |
+| `requested_block`, `requested_tx` | `BIGINT`, `TEXT` | Latest filing transaction | tx |
+| `closed_block`, `closed_tx` | `BIGINT`, `TEXT` | Transaction that removed it. `NULL` while pending. | tx |
+| `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
+
 ### `disclosure_nullifiers`
 
 One row per successful `proveAttributeMembershipOnce`. There are deliberately no event, field or
@@ -187,6 +215,7 @@ has an action. See [Operation](operations.md#measuring-lag) before using it for 
 | `disclosure_requests_verifier_pk_idx` | `disclosure_requests(verifier_pk)` | `GET /api/disclosure-requests?verifierPk=` |
 | `disclosure_requests_recipient_pk_idx` | `disclosure_requests(recipient_pk)` | `GET /api/disclosure-requests?recipientPk=` |
 | `disclosure_requests_event_id_idx` | `disclosure_requests(event_id)` | not used by a current endpoint |
+| `credential_update_requests_status_idx` | `credential_update_requests(status)` | `GET /api/credential-update-requests?status=` |
 
 ## Migrations
 

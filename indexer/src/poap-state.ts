@@ -38,6 +38,7 @@ export async function applyStateDiff(
     await handleTokens(client, prev, curr, meta);
     await handleDisclosures(client, prev, curr, meta);
     await handleDisclosureRequests(client, prev, curr, meta);
+    await handleCredentialUpdateRequests(client, prev, curr, meta);
     await client.query('COMMIT');
     console.log(`[state] ${operation} @ block ${meta.blockHeight} tx ${meta.txHash.slice(0, 16)}…`);
   } catch (err) {
@@ -302,6 +303,59 @@ async function handleDisclosureRequests(
       ],
     );
     console.log(`  [+] disclosure request ${toHex(k).slice(0, 16)}… published`);
+  }
+}
+
+// ── Credential Update Requests ─────────────────────────────────────────────────
+//
+// The ledger holds only pending requests. Added or updated (the holder filed
+// again with a new commitment) → pending. Removed → closed, and the reason is
+// read from the same diff: if the token is burned in the current state it was
+// burn() (the issuer re-issuing, a revocation or a self-burn), otherwise
+// dismissCredentialUpdate.
+
+async function handleCredentialUpdateRequests(
+  client: PoolClient,
+  prev: LedgerView,
+  curr: LedgerView,
+  meta: TxMeta,
+): Promise<void> {
+  const prevSnap = snapshotMap(prev.credentialUpdateRequests, (id) => bigintKey(id));
+  const currSnap = snapshotMap(curr.credentialUpdateRequests, (id) => bigintKey(id));
+  const diff = diffMap(prevSnap, currSnap, (a, b) => toHex(a) === toHex(b));
+
+  const filed = [
+    ...diff.added.map(({ k, v }) => ({ k, v })),
+    ...diff.updated.map(({ k, curr: v }) => ({ k, v })),
+  ];
+  for (const { k, v } of filed) {
+    await client.query(
+      `INSERT INTO credential_update_requests
+         (token_id, payload_commit, status, requested_block, requested_tx)
+       VALUES ($1, $2, 'pending', $3, $4)
+       ON CONFLICT (token_id) DO UPDATE
+         SET payload_commit  = EXCLUDED.payload_commit,
+             status          = 'pending',
+             requested_block = EXCLUDED.requested_block,
+             requested_tx    = EXCLUDED.requested_tx,
+             closed_block    = NULL,
+             closed_tx       = NULL`,
+      [k.toString(), toHex(v), meta.blockHeight.toString(), meta.txHash],
+    );
+    console.log(`  [+] update request for token #${k} filed`);
+  }
+
+  if (diff.removed.length === 0) return;
+  const burned = new Set<string>();
+  for (const [id] of curr.burnedTokens) burned.add(bigintKey(id));
+  for (const { k } of diff.removed) {
+    const status = burned.has(bigintKey(k)) ? 'burned' : 'dismissed';
+    await client.query(
+      `UPDATE credential_update_requests SET status = $1, closed_block = $2, closed_tx = $3
+       WHERE token_id = $4`,
+      [status, meta.blockHeight.toString(), meta.txHash, k.toString()],
+    );
+    console.log(`  [-] update request for token #${k} ${status}`);
   }
 }
 

@@ -41,7 +41,7 @@ export type MerklePathArg = {
 const LEAF_DOMAIN_SEP = Buffer.from('mdn:lh', 'ascii');
 const FIELD_PAIR = new CompactTypeVector<bigint>(2, CompactTypeField);
 
-function leafDigestField(leafBytes32: Uint8Array): bigint {
+export function leafDigestField(leafBytes32: Uint8Array): bigint {
   const sha = createHash('sha256')
     .update(Buffer.concat([LEAF_DOMAIN_SEP, Buffer.from(leafBytes32)]))
     .digest();
@@ -246,6 +246,34 @@ export class PoapSimulator {
       .context;
     this.savePrivateState();
     return this.getLedger();
+  }
+
+  // ── Credential update requests ────────────────────────────────────────────
+
+  requestCredentialUpdate(tokenId: bigint, payloadCommit: Uint8Array): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .requestCredentialUpdate(this.circuitContext, tokenId, payloadCommit)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
+  dismissCredentialUpdate(tokenId: bigint): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .dismissCredentialUpdate(this.circuitContext, tokenId)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
+  // Pure helper — see computeIdentityValue in poap.compact.
+  static computeIdentityValue(
+    country: Uint8Array,
+    docType: Uint8Array,
+    number: Uint8Array,
+    salt: Uint8Array,
+  ): Uint8Array {
+    return pureCircuits.computeIdentityValue(country, docType, number, salt);
   }
 
   // ── Private metadata (commit/reveal) ─────────────────────────────────────

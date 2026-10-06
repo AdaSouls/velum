@@ -9,6 +9,7 @@ import {
   ISSUER2_SK,
   makeEventId,
   buildMerklePath,
+  leafDigestField,
 } from './poap-simulator.js';
 
 setNetworkId('undeployed');
@@ -1635,5 +1636,228 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     sim.asUser(ISSUER1_SK).burn(0n);
     expect(() => sim.asUser(USER1_SK).proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, credPath))
       .toThrow('Credential not in tree');
+  });
+});
+
+// ── Identity documents ────────────────────────────────────────────────────────
+
+const text32 = (value: string): Uint8Array => {
+  const out = new Uint8Array(32);
+  out.set(new TextEncoder().encode(value));
+  return out;
+};
+
+// Path of one leaf of a two-leaf off-ledger tree (index 0 or 1); both
+// leaves' paths lead to the same root.
+function twoLeafPath(leaves: [Uint8Array, Uint8Array], index: 0 | 1, depth: number) {
+  const siblings = new Array(depth).fill(0n);
+  siblings[0] = leafDigestField(leaves[1 - index]);
+  const goesLeft = new Array(depth).fill(true);
+  goesLeft[0] = index === 0;
+  return buildMerklePath(leaves[index], depth, siblings, goesLeft);
+}
+
+describe('POAP contract — computeIdentityValue', () => {
+  const ARG = text32('ARG');
+  const NATIONAL_ID = text32('national_id');
+  const SALT = new Uint8Array(32).fill(0x5a);
+
+  it('is deterministic and depends on every input', () => {
+    const base = PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, text32('30123456'), SALT);
+    expect(base).toHaveLength(32);
+    expect(PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, text32('30123456'), SALT)).toEqual(base);
+    const variants = [
+      PoapSimulator.computeIdentityValue(text32('CHL'), NATIONAL_ID, text32('30123456'), SALT),
+      PoapSimulator.computeIdentityValue(ARG, text32('passport'), text32('30123456'), SALT),
+      PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, text32('30123457'), SALT),
+      PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, text32('30123456'), new Uint8Array(32).fill(0x5b)),
+    ];
+    for (const v of variants) expect(v).not.toEqual(base);
+  });
+
+  it('rejects an all-zero salt', () => {
+    expect(() => PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, text32('30123456'), ZERO_32))
+      .toThrow('Identity salt is required');
+  });
+});
+
+describe('POAP contract — identity documents stop credential lending', () => {
+  const FIELD_GPA = new Uint8Array(32).fill(0x47);
+  const FIELD_NATIONAL_ID = new Uint8Array(32).fill(0x49);
+  const FIELD_PASSPORT = new Uint8Array(32).fill(0x50);
+  const GPA_9 = text32('9');
+  const ARG = text32('ARG');
+  const NATIONAL_ID = text32('national_id');
+  const PASSPORT = text32('passport');
+  const FRIEND_DNI = text32('30123456');
+  const FRIEND_PASSPORT = text32('AAB123456');
+  const CANDIDATE_DNI = text32('40111222');
+  const ID_SALT = new Uint8Array(32).fill(0x51);
+  const PASSPORT_SALT = new Uint8Array(32).fill(0x52);
+  const RAND_GPA = new Uint8Array(32).fill(0x61);
+  const RAND_ID = new Uint8Array(32).fill(0x62);
+  const RAND_PASSPORT = new Uint8Array(32).fill(0x63);
+  const LABEL_ID = new Uint8Array(32).fill(0x2a);
+  const LABEL_GPA = new Uint8Array(32).fill(0x2b);
+  const LABEL_PASSPORT = new Uint8Array(32).fill(0x2c);
+
+  // The university (ISSUER1) issues USER1 — the friend, who qualifies — a
+  // degree (token 0) whose attribute tree is either [gpa, nationalId] or,
+  // for a credential with two documents, [nationalId, passport].
+  function issue(documents: 'gpaAndNationalId' | 'twoDocuments') {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false);
+    const issuerPk = sim.getCallerPk();
+    const friendPk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    const dniValue = PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, FRIEND_DNI, ID_SALT);
+    const passportValue = PoapSimulator.computeIdentityValue(ARG, PASSPORT, FRIEND_PASSPORT, PASSPORT_SALT);
+    const gpaLeaf = PoapSimulator.computeCredentialAttrLeaf(FIELD_GPA, GPA_9, RAND_GPA);
+    const idLeaf = PoapSimulator.computeCredentialAttrLeaf(FIELD_NATIONAL_ID, dniValue, RAND_ID);
+    const passportLeaf = PoapSimulator.computeCredentialAttrLeaf(FIELD_PASSPORT, passportValue, RAND_PASSPORT);
+    const paths = documents === 'gpaAndNationalId'
+      ? { gpa: twoLeafPath([gpaLeaf, idLeaf], 0, 8), id: twoLeafPath([gpaLeaf, idLeaf], 1, 8), passport: null }
+      : { gpa: null, id: twoLeafPath([idLeaf, passportLeaf], 0, 8), passport: twoLeafPath([idLeaf, passportLeaf], 1, 8) };
+    sim.asUser(ISSUER1_SK).mintTo(eventA, friendPk, 'ipfs://degree', ZERO_32, paths.id.rootBytes);
+    const credPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, paths.id.rootBytes);
+    return { sim, eventA, issuerPk, friendPk, dniValue, passportValue, paths, credPath };
+  }
+
+  // The verifier publishes one addressed request per document, the set being
+  // the single value it rebuilt from the document it checked.
+  function askIdentity(sim: PoapSimulator, eventA: Uint8Array, recipient: Uint8Array, label: Uint8Array,
+                       fieldId: Uint8Array, value: Uint8Array) {
+    const set = buildMerklePath(value, 16);
+    const requestId = sim.asUser(ADMIN_SK).publishDisclosureRequest(label, eventA, fieldId, set.rootBytes, recipient);
+    return { requestId, setPath: { leaf: set.leaf, path: set.path } };
+  }
+
+  it('the real holder proves both the GPA and that the credential is tied to the document checked', () => {
+    const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
+    const gpaSet = buildMerklePath(GPA_9, 16);
+    const gpaReq = sim.asUser(ADMIN_SK).publishDisclosureRequest(LABEL_GPA, eventA, FIELD_GPA, gpaSet.rootBytes, friendPk);
+    const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, dniValue);
+    sim.asUser(USER1_SK);
+    const gpa = paths.gpa!;
+    expect(() => sim.proveCredentialAttribute(gpaReq, GPA_9, RAND_GPA,
+      { leaf: gpa.leaf, path: gpa.path }, { leaf: gpaSet.leaf, path: gpaSet.path }, credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
+      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath)).not.toThrow();
+  });
+
+  it('a borrowed key fails the identity check, even with the friend\'s salt', () => {
+    const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
+    // The candidate hands over the friend's key and salt; the verifier
+    // rebuilds the value from the CANDIDATE's own document.
+    const expected = PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, CANDIDATE_DNI, ID_SALT);
+    const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, expected);
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
+      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath))
+      .toThrow('Set path does not match the hidden value');
+    // Grafting the expected value onto the friend's real leaf breaks the attribute path instead.
+    const forgedSet = buildMerklePath(expected, 16);
+    expect(() => sim.proveCredentialAttribute(idReq.requestId, expected, RAND_ID,
+      { leaf: paths.id.leaf, path: paths.id.path }, { leaf: forgedSet.leaf, path: forgedSet.path }, credPath))
+      .toThrow('Path does not match the recomputed leaf');
+  });
+
+  it('a credential with several documents can be checked against any one of them', () => {
+    const { sim, eventA, friendPk, dniValue, passportValue, paths, credPath } = issue('twoDocuments');
+    const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, dniValue);
+    const passportReq = askIdentity(sim, eventA, friendPk, LABEL_PASSPORT, FIELD_PASSPORT, passportValue);
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
+      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath)).not.toThrow();
+    const passport = paths.passport!;
+    expect(() => sim.proveCredentialAttribute(passportReq.requestId, passportValue, RAND_PASSPORT,
+      { leaf: passport.leaf, path: passport.path }, passportReq.setPath, credPath)).not.toThrow();
+    // A document value can't answer for another document's field.
+    expect(() => sim.proveCredentialAttribute(passportReq.requestId, dniValue, RAND_ID,
+      { leaf: paths.id.leaf, path: paths.id.path }, passportReq.setPath, credPath))
+      .toThrow('Path does not match the recomputed leaf');
+  });
+});
+
+// ── Credential update requests ────────────────────────────────────────────────
+
+describe('POAP contract — credential update requests', () => {
+  const COMMIT = new Uint8Array(32).fill(0xc1);
+  const COMMIT_2 = new Uint8Array(32).fill(0xc2);
+
+  // ISSUER1 push-mints USER1 a credential (token 0).
+  function setUp() {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false);
+    const issuerPk = sim.getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    sim.asUser(ISSUER1_SK).mintTo(eventA, user1Pk);
+    return { sim, eventA, issuerPk, user1Pk };
+  }
+
+  it('the holder files a request, and filing again replaces its commitment', () => {
+    const { sim } = setUp();
+    const state = sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    expect(state.credentialUpdateRequests.lookup(0n)).toEqual(COMMIT);
+    const replaced = sim.requestCredentialUpdate(0n, COMMIT_2);
+    expect(replaced.credentialUpdateRequests.size()).toBe(1n);
+    expect(replaced.credentialUpdateRequests.lookup(0n)).toEqual(COMMIT_2);
+  });
+
+  it('only the token\'s holder can file one', () => {
+    const { sim } = setUp();
+    expect(() => sim.asUser(USER2_SK).requestCredentialUpdate(0n, COMMIT)).toThrow('Not the token owner');
+    expect(() => sim.asUser(ISSUER1_SK).requestCredentialUpdate(0n, COMMIT)).toThrow('Not the token owner');
+    expect(() => sim.asUser(ADMIN_SK).requestCredentialUpdate(0n, COMMIT)).toThrow('Not the token owner');
+  });
+
+  it('rejects a missing commitment, an unknown or burned token, and a paused contract', () => {
+    const { sim } = setUp();
+    expect(() => sim.asUser(USER1_SK).requestCredentialUpdate(0n, ZERO_32))
+      .toThrow('Update request commitment is required');
+    expect(() => sim.requestCredentialUpdate(7n, COMMIT)).toThrow('Token does not exist');
+    sim.asUser(ADMIN_SK).pause();
+    expect(() => sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT)).toThrow('Contract is paused');
+    sim.asUser(ADMIN_SK).unpause();
+    sim.asUser(USER1_SK).burn(0n);
+    expect(() => sim.requestCredentialUpdate(0n, COMMIT)).toThrow('Token burned');
+  });
+
+  it('the issuer or the admin can dismiss it; nobody else, and only while pending', () => {
+    const { sim } = setUp();
+    expect(() => sim.asUser(ISSUER1_SK).dismissCredentialUpdate(0n)).toThrow('No pending update request');
+    sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    expect(() => sim.asUser(USER1_SK).dismissCredentialUpdate(0n)).toThrow('Not authorized to dismiss this request');
+    expect(() => sim.asUser(ISSUER2_SK).dismissCredentialUpdate(0n)).toThrow('Not authorized to dismiss this request');
+    expect(sim.asUser(ISSUER1_SK).dismissCredentialUpdate(0n).credentialUpdateRequests.member(0n)).toBe(false);
+    sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    expect(sim.asUser(ADMIN_SK).dismissCredentialUpdate(0n).credentialUpdateRequests.member(0n)).toBe(false);
+  });
+
+  it('re-issue: the issuer burns the token (clearing the request) and mints the updated credential', () => {
+    const { sim, eventA, issuerPk, user1Pk } = setUp();
+    const FIELD_ID = new Uint8Array(32).fill(0x49);
+    const RAND = new Uint8Array(32).fill(0x62);
+    const newValue = PoapSimulator.computeIdentityValue(
+      text32('ARG'), text32('passport'), text32('AAC765432'), new Uint8Array(32).fill(0x53));
+    const attr = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_ID, newValue, RAND), 8);
+
+    sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    expect(sim.asUser(ISSUER1_SK).burn(0n).credentialUpdateRequests.member(0n)).toBe(false);
+    const state = sim.mintTo(eventA, user1Pk, 'ipfs://x', ZERO_32, attr.rootBytes); // token 1
+    expect(state.tokenOwner.lookup(1n)).toEqual(user1Pk);
+
+    // The updated credential proves the new document.
+    const set = buildMerklePath(newValue, 16);
+    const requestId = sim.asUser(ADMIN_SK)
+      .publishDisclosureRequest(new Uint8Array(32).fill(0x2d), eventA, FIELD_ID, set.rootBytes, user1Pk);
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveCredentialAttribute(requestId, newValue, RAND, { leaf: attr.leaf, path: attr.path },
+      { leaf: set.leaf, path: set.path }, sim.credentialPath(1n, issuerPk, attr.rootBytes))).not.toThrow();
+  });
+
+  it('a self-burn also clears a pending request', () => {
+    const { sim } = setUp();
+    sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    expect(sim.burn(0n).credentialUpdateRequests.member(0n)).toBe(false);
   });
 });

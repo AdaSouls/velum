@@ -134,6 +134,8 @@ const PROOF_CIRCUIT_IDS = [
   'proveTokenOwnership',
   'proveEventAttendance',
   'proveCredentialAttribute',
+  'requestCredentialUpdate',
+  'dismissCredentialUpdate',
 ] as const;
 
 const PRIVATE_STATE_ID = 'poapPrivateState';
