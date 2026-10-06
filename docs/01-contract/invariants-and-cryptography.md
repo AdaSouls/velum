@@ -28,6 +28,7 @@ Properties that hold after every transaction. "Enforced by" says what guarantees
 | After a revocation, the holder cannot `claim` that event again; only the issuer or admin can issue a replacement. | The index entry is kept on revocation, and only `mintTo` passes `reissueRevoked`. |
 | After a self-burn, the holder can `claim` again. | `burn` removes the index entry when the caller is the owner. |
 | A burned token stays burned. | `burnedTokens` entries are only added. |
+| A pending update request belongs to a live token and was filed by its holder. | `requestCredentialUpdate` checks the token is not burned and that the caller's pseudonym is its owner; `burn` removes the request. Only the issuer or the admin can dismiss one. |
 | An organizer cannot give themselves a token of their own event with their own key. | `claim` rejects the organizer's key; `mintTo` rejects the caller's own pseudonym. This binds one key only (see [Security](security.md#threat-model)), and the admin can still mint to an organizer. |
 | No token is minted for an inactive or expired event, or under a blocked issuer. | `assert`s in `mintTokenTo` |
 
@@ -95,6 +96,7 @@ one purpose can never collide with one computed for another.
 | Credential attribute leaf | `"adasouls:cred-attr:v1:"`, `fieldId`, `commit(value, rand)` | Leaf of a credential's attribute tree |
 | Event attribute leaf | `"adasouls:attr-leaf:v1:"`, `eventId`, `fieldId`, `commit(value, rand)` | Leaf of an event's attribute tree |
 | Nullifier | `"adasouls:disclosure:v2:"`, `sk`, `requestId` | Single-use disclosure |
+| Identity value | `"velum:identity:v1:"`, `country`, `docType`, `number`, `salt` | Ties a credential attribute to one identity document |
 
 Changing any of these formulas in an upgrade would orphan the data already stored under the old
 values.

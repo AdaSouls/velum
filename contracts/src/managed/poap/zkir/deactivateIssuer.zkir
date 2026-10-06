@@ -60,7 +60,7 @@
     { "op": "cond_select", "bit": 19, "a": 20, "b": 8 },
     { "op": "assert", "cond": 21 },
     { "op": "load_imm", "imm": "71" },
-    { "op": "load_imm", "imm": "08" },
+    { "op": "load_imm", "imm": "07" },
     { "op": "declare_pub_input", "var": 22 },
     { "op": "declare_pub_input", "var": 2 },
     { "op": "declare_pub_input", "var": 2 },

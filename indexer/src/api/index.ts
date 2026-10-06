@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { eventsRouter } from './routes/events.js';
 import { tokensRouter } from './routes/tokens.js';
 import { disclosuresRouter } from './routes/disclosures.js';
+import { updateRequestsRouter } from './routes/update-requests.js';
 import { config } from '../config.js';
 
 export function startApiServer(db: Pool): void {
@@ -23,6 +24,7 @@ export function startApiServer(db: Pool): void {
   app.use('/api/events', eventsRouter(db));
   app.use('/api/tokens', tokensRouter(db));
   app.use('/api/disclosure-requests', disclosuresRouter(db));
+  app.use('/api/credential-update-requests', updateRequestsRouter(db));
 
   app.listen(config.apiPort, () => {
     console.log(`[api] listening on http://localhost:${config.apiPort}`);

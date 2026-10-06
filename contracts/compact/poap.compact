@@ -202,6 +202,20 @@ export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 //         (insert leaf), burn (clear leaf, reset root history).
 export ledger credentials: HistoricMerkleTree<20, Bytes<32>>;
 
+// tokenId → commitment to the holder's off-chain update request: the
+// holder asks the token's issuer to re-issue the credential, typically
+// because an identity document behind one of its attributes changed (see
+// computeIdentityValue). The request itself (which document, the new
+// number) travels off-chain, encrypted to the issuer; this entry is what
+// lets the issuer trust that envelope came from the token's holder — the
+// envelope must hash to the stored commitment, and only the holder can
+// write it here. Removed when the issuer dismisses it or when the token is
+// burned (the re-issue path: burn, then mintTo the updated credential).
+// @ledger Public: that a token's holder asked for an update, and when.
+//         Never the document data. Written by: requestCredentialUpdate
+//         (insert), dismissCredentialUpdate and burn (remove).
+export ledger credentialUpdateRequests: Map<Uint<64>, Bytes<32>>;
+
 // Contract-level pause flag
 // @ledger Written by: constructor, pause, unpause.
 export ledger isPaused: Boolean;
@@ -782,7 +796,8 @@ export circuit mintTo(
 // @asserts   Not paused; token exists; not already burned; caller is owner,
 //            issuer or admin.
 // @writes    burnedTokens[tokenId]; credentials (leaf cleared, history
-//            reset); eventHolderToken entry removed on a self-burn only.
+//            reset); credentialUpdateRequests (pending request removed);
+//            eventHolderToken entry removed on a self-burn only.
 // @discloses tokenId. Whether it was a self-burn or a revocation is visible
 //            too (only a self-burn removes the eventHolderToken entry).
 export circuit burn(tokenId: Uint<64>): [] {
@@ -797,10 +812,72 @@ export circuit burn(tokenId: Uint<64>): [] {
   burnedTokens.insert(tId, true);
   credentials.insertIndexDefault(tId);
   credentials.resetHistory();
+  // A burned token can't be updated any more: a pending update request is
+  // either answered by this burn (the issuer re-issues next with mintTo)
+  // or moot (the holder or a revocation burned it).
+  if (credentialUpdateRequests.member(tId)) {
+    credentialUpdateRequests.remove(tId);
+  }
   if (isOwner) {
     const evId = tokenEvent.lookup(tId);
     eventHolderToken.remove(holder_event_key(ownerPk, evId));
   }
+}
+
+// ── Token: Credential Update Requests ────────────────────────────────────────
+//
+// A credential's attributes are fixed at mint time (credentialAttributesRoot
+// is hashed into its credential leaf), so changing one — e.g. an identity
+// document that was renewed with a new number — means re-issuing the
+// credential. These two circuits are the on-chain half of asking for that:
+// the holder files a request, the issuer either re-issues (burn + mintTo,
+// which also clears the request) or dismisses it.
+
+// Files (or replaces) an update request for one of the caller's tokens.
+// payloadCommit is a commitment to the off-chain request the holder sends
+// the issuer (e.g. a hash of the encrypted envelope): it binds that
+// envelope to the token's holder, so the issuer can tell a genuine request
+// from one anybody could post off-chain. Filing again replaces the
+// commitment (e.g. to correct a typo before the issuer acts on it).
+// @circuit   Holder asks the issuer to re-issue one of their credentials.
+// @param     tokenId        The holder's token to update.
+// @param     payloadCommit  Commitment to the off-chain request. Non-zero.
+// @auth      The token's owner: holder_pk(issuer) rebuilt from local_sk must
+//            equal tokenOwner[tokenId].
+// @asserts   Not paused; token exists, is not burned; caller is its owner;
+//            payloadCommit is non-zero.
+// @writes    credentialUpdateRequests[tokenId].
+// @discloses tokenId (and with it the holder pseudonym already public in
+//            tokenOwner) and payloadCommit. Anyone can see THAT this token's
+//            holder asked for an update; nobody but the issuer sees what.
+// @private   The secret key.
+export circuit requestCredentialUpdate(tokenId: Uint<64>, payloadCommit: Bytes<32>): [] {
+  const tId = disclose(tokenId);
+  const commit = disclose(payloadCommit);
+  assert(!isPaused, "Contract is paused");
+  assert(tokenOwner.member(tId), "Token does not exist");
+  assert(!burnedTokens.member(tId), "Token burned");
+  assert(tokenOwner.lookup(tId) == holder_pk(tokenIssuer.lookup(tId)), "Not the token owner");
+  assert(commit != default<Bytes<32>>, "Update request commitment is required");
+  credentialUpdateRequests.insert(tId, commit);
+}
+
+// Closes a pending update request without re-issuing (e.g. the new data
+// couldn't be verified). To accept a request, the issuer burns the token
+// and mints the updated credential instead — burn clears the request.
+// @circuit   Issuer or admin dismisses a holder's update request.
+// @param     tokenId  The token whose request is dismissed.
+// @auth      The token's issuer, or the admin.
+// @asserts   Not paused; the token has a pending update request; caller is
+//            its issuer or the admin.
+// @writes    credentialUpdateRequests (removes tokenId).
+// @discloses tokenId. Not which of the two roles called.
+export circuit dismissCredentialUpdate(tokenId: Uint<64>): [] {
+  const tId = disclose(tokenId);
+  assert(!isPaused, "Contract is paused");
+  assert(credentialUpdateRequests.member(tId), "No pending update request");
+  assert(is_admin() || tokenIssuer.lookup(tId) == caller_pk(), "Not authorized to dismiss this request");
+  credentialUpdateRequests.remove(tId);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -1242,6 +1319,38 @@ export pure circuit computeCredentialLeaf(eventId: Bytes<32>, holderPk: Bytes<32
 // @discloses Nothing on-chain (see computePrivateMetadataCommit).
 export pure circuit computeCredentialAttrLeaf(fieldId: Bytes<32>, value: Bytes<32>, rand: Bytes<32>): Bytes<32> {
   return credential_attr_leaf(disclose(fieldId), disclose(value), disclose(rand));
+}
+
+// Pure off-chain helper (issuer, holder and verifier tooling): the
+// attribute value that ties a credential to one identity document, so a
+// verifier who has checked the person's document can make sure the
+// credential being proven is theirs and not a friend's (credential
+// lending). The issuer stores it as an ordinary credential attribute
+// (computeCredentialAttrLeaf); a credential may carry several, one per
+// document, each under its own fieldId. The verifier rebuilds it from the
+// document they checked plus the salt the holder gives them, and publishes
+// an addressed request whose set is just that one value.
+//
+// The inputs are canonical text, right-padded with zero bytes to 32 —
+// agreeing on the normalization is the callers' job (country: ISO 3166-1
+// alpha-3, e.g. "ARG"; docType: e.g. "national_id", "passport"; number:
+// upper-case, no spaces or separators). The salt is what keeps a request's
+// public setRoot from revealing the document: without it, document numbers
+// are few enough to brute-force from the root. Use a fresh random salt per
+// document per credential; the holder shares it only with verifiers.
+// @circuit   Pure helper, runs locally: no proof, no transaction.
+// @param     country  Issuing country, ISO 3166-1 alpha-3, padded.
+// @param     docType  Document type, padded.
+// @param     number   Normalized document number, padded.
+// @param     salt     32 random bytes. Non-zero.
+// @returns   The attribute value to store for this document.
+// @writes    none.
+// @discloses Nothing on-chain (see computePrivateMetadataCommit).
+export pure circuit computeIdentityValue(country: Bytes<32>, docType: Bytes<32>, number: Bytes<32>, salt: Bytes<32>): Bytes<32> {
+  assert(disclose(salt) != default<Bytes<32>>, "Identity salt is required");
+  return persistentHash<Vector<5, Bytes<32>>>(
+           [pad(32, "velum:identity:v1:"), disclose(country), disclose(docType), disclose(number), disclose(salt)]
+           );
 }
 
 // Proves the caller owns live token `tokenId` of the request's event.

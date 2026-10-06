@@ -21,6 +21,7 @@ tags:
   - name: events
   - name: tokens
   - name: disclosure-requests
+  - name: credential-update-requests
 paths:
   /health:
     get:
@@ -237,6 +238,74 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/credential-update-requests:
+    get:
+      tags: [credential-update-requests]
+      summary: List credential update requests
+      description: By request block ascending. Not paginated.
+      parameters:
+        - name: issuerPk
+          in: query
+          required: false
+          description: Return only requests for tokens of this issuer.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+        - name: ownerPk
+          in: query
+          required: false
+          description: Return only requests filed by this holder pseudonym.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/UpdateRequestStatus"
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CredentialUpdateRequest"
+        "400":
+          description: Unknown status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/credential-update-requests/{tokenId}:
+    get:
+      tags: [credential-update-requests]
+      summary: Get a token's update request
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: The token's latest request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialUpdateRequest"
+        "400":
+          description: Invalid tokenId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   parameters:
     EventId:
@@ -424,5 +493,56 @@ components:
           type: integer
           nullable: true
         publishedTx:
+          type: string
+          nullable: true
+    UpdateRequestStatus:
+      type: string
+      enum: [pending, dismissed, burned]
+      description: >-
+        pending while on the ledger; dismissed after dismissCredentialUpdate; burned after burn
+        (a re-issue, a revocation or a self-burn).
+    CredentialUpdateRequest:
+      type: object
+      required:
+        - tokenId
+        - ownerPk
+        - issuerPk
+        - eventId
+        - payloadCommit
+        - status
+        - requestedBlock
+        - requestedTx
+        - closedBlock
+        - closedTx
+      properties:
+        tokenId:
+          type: integer
+        ownerPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: Holder pseudonym that filed the request.
+        issuerPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The token's issuer, who should act on it.
+        eventId:
+          $ref: "#/components/schemas/Hex32"
+        payloadCommit:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: Commitment to the off-chain request, sent to the issuer encrypted.
+        status:
+          $ref: "#/components/schemas/UpdateRequestStatus"
+        requestedBlock:
+          type: integer
+          nullable: true
+        requestedTx:
+          type: string
+          nullable: true
+        closedBlock:
+          type: integer
+          nullable: true
+          description: null while pending.
+        closedTx:
           type: string
           nullable: true

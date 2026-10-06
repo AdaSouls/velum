@@ -86,6 +86,10 @@ export type LedgerView = {
   // eventId/fieldId/setRoot it points at are public precisely because
   // they're readable here, not because the prover disclosed them.
   disclosureRequests: Iterable<[Uint8Array, DisclosureRequest]>;
+  // tokenId → commitment to the holder's off-chain update request (see
+  // requestCredentialUpdate in poap.compact). Only pending requests are on
+  // the ledger: dismissCredentialUpdate and burn remove them.
+  credentialUpdateRequests: Iterable<[bigint, Uint8Array]>;
   isPaused: boolean;
   adminPk: Uint8Array;
 };

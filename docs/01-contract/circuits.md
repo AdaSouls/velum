@@ -17,7 +17,7 @@ chain never sees witness outputs or undisclosed arguments.
 
 ## Circuit reference
 
-The contract exports 25 circuits. 18 of them need a proof and a transaction.
+The contract exports 28 circuits. 20 of them need a proof and a transaction.
 
 ### State-changing (proof + transaction)
 
@@ -31,7 +31,9 @@ The contract exports 25 circuits. 18 of them need a proof and a transaction.
 | `reactivateEvent(eventId)` | Admin | Resumes minting |
 | `claim(eventId, isSoulbound)` | Anyone but the organizer | Mints a token of a public event to the caller |
 | `mintTo(eventId, recipientPk, tokenMetadataURI, tokenPrivateMetadataCommit, credentialAttributesRoot)` | Admin or organizer | Mints a token to a recipient; re-issues after a revocation |
-| `burn(tokenId)` | Owner, issuer or admin | Burns or revokes a token |
+| `burn(tokenId)` | Owner, issuer or admin | Burns or revokes a token; removes its pending update request |
+| `requestCredentialUpdate(tokenId, payloadCommit)` | Token owner | Files or replaces a request to re-issue the credential |
+| `dismissCredentialUpdate(tokenId)` | Issuer or admin | Closes a pending update request without re-issuing |
 | `revealPrivateMetadata(eventId, value, rand)` | Anyone with the opening | Publishes an event's committed metadata digest |
 | `revealPrivateTokenMetadata(tokenId, value, rand)` | Anyone with the opening | Publishes a token's committed metadata digest |
 | `publishDisclosureRequest(label, eventId, fieldId, setRoot, recipient)` | Anyone | Pins a verifier's question, open or addressed to one holder; returns its id |
@@ -65,8 +67,9 @@ requests only.
 | `computeAttributeLeaf(eventId, fieldId, value, rand)` | A leaf of an event's attribute tree |
 | `computeCredentialAttrLeaf(fieldId, value, rand)` | A leaf of a credential's attribute tree |
 | `computeCredentialLeaf(eventId, holderPk, credAttrRoot)` | A leaf of the `credentials` tree |
+| `computeIdentityValue(country, docType, number, salt)` | The attribute value that ties a credential to one identity document |
 
-The last five are exposed as `pureCircuits` in the generated API. `getCallerPk` and `getHolderPk`
+The last six are exposed as `pureCircuits` in the generated API. `getCallerPk` and `getHolderPk`
 need a circuit context because they call a witness, and they are not part of the transaction API
 (`callTx`), so the frontend re-derives both values locally instead.
 
@@ -304,3 +307,56 @@ counts toward `maxSupply`.
 
 A blocked organizer cannot create events, and no token can be minted under their existing events.
 Tokens already minted are unaffected.
+
+### 12. Tie a credential to identity documents
+
+Answers credential lending: someone hands a verifier the key of a friend who qualifies, and the
+friend answers the request. An addressed request only proves "the owner of this key"; an identity
+attribute proves the credential belongs to the person whose document the verifier checked.
+
+**Issuer, at mint time (flow 3).** For each document the credential should carry (none, one or
+several; all optional):
+
+1. Normalize it: country as ISO 3166-1 alpha-3 (`ARG`), a document type (`national_id`,
+   `passport`, …), the number upper-case without spaces or separators. Prefer a number that lasts
+   a lifetime (the person's national id number, not the card's serial).
+2. Draw a random 32-byte salt and compute `computeIdentityValue(country, docType, number, salt)`,
+   each text input right-padded with zeros to 32 bytes.
+3. Store it as a credential attribute under its own `fieldId`, like any other attribute. The
+   holder receives the salt with the other openings.
+
+**Verifier.** Checks the person's document as usual and asks them for that document's salt. They
+compute the same value, publish an addressed request whose set holds only that value, and the
+holder answers with `proveCredentialAttribute` (flow 7). Ask the real question (e.g. a grade) in a
+second request addressed to the same pseudonym: a holder has one credential per event, so both
+proofs are about the same credential.
+
+**What it stops.** The friend's credential holds the friend's document, so the identity proof
+fails for the person being checked, even with the friend's salt. What it relies on: the issuer
+checked the document before issuing, and the verifier checks the person's.
+
+**Why the salt.** The request's `setRoot` is public. Without a salt, document numbers are few
+enough to brute-force from it, linking the pseudonym to the document for anyone watching.
+
+### 13. Request a credential update
+
+When a document behind a credential changes, the credential has to be re-issued: its attributes
+are fixed in its credential leaf.
+
+1. **Holder.** Encrypt the request (which document, the new data) to the issuer and send it
+   off-chain. Call `requestCredentialUpdate(tokenId, payloadCommit)` with a commitment to that
+   envelope (e.g. its hash). Filing again replaces the commitment.
+2. **Issuer.** Find pending requests (indexer: `/api/credential-update-requests?issuerPk=…&status=pending`),
+   check the envelope against `payloadCommit`, verify the new document, then either:
+   - re-issue: `burn(tokenId)`, which also removes the request, then `mintTo` the updated
+     credential for the same pseudonym (flow 10); or
+   - `dismissCredentialUpdate(tokenId)`.
+
+**Verified on-chain**
+
+- `requestCredentialUpdate`: not paused; the token exists, is not burned, and the caller's
+  pseudonym is its owner; the commitment is not all zeros.
+- `dismissCredentialUpdate`: not paused; the token has a pending request; the caller is its issuer
+  or the admin.
+
+**Public:** that a token's holder asked for an update, and when. The content stays off-chain.

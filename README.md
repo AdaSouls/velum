@@ -82,7 +82,10 @@ Limits worth knowing:
 - **The anonymity set is the live credentials of that event.** In a small event it's small.
 - **Credentials can be lent.** Someone who shares their secret key can't be stopped
   cryptographically — true of any credential system. An open request can also be answered by any
-  other holder of the event; address the request when it matters who answers.
+  other holder of the event; address the request when it matters who answers. To make sure the
+  credential belongs to the person in front of you (not to a friend who lent their key), the
+  issuer can tie it to one or more identity documents (`computeIdentityValue`) and the verifier
+  checks the one they saw — see [flow 12](docs/01-contract/circuits.md#12-tie-a-credential-to-identity-documents).
 - **Addressed requests aren't anonymous.** The request names the holder's pseudonym on-chain.
 - **Set size matters.** Asking "is your value in {X}" with a one-element set is full disclosure.
 
@@ -95,6 +98,11 @@ The full map of what is public, what is private and what can be inferred is in
 `burn` can be called by the holder, the issuer, or the admin. It marks the token burned, removes
 its leaf from the credential tree and resets the tree's root history, so a revoked credential
 can't be proven against any old root either.
+
+A credential's attributes are fixed when it's minted. When one changes (e.g. an identity document
+renewed with a new number), the holder files `requestCredentialUpdate` and the issuer re-issues
+(`burn` + `mintTo`) or `dismissCredentialUpdate`s it — see
+[flow 13](docs/01-contract/circuits.md#13-request-a-credential-update).
 
 There is **no transfer circuit**: no circuit ever changes the owner of an existing token, so
 credentials are soulbound by construction.
@@ -144,7 +152,7 @@ found while writing it.
 | `contracts/src/managed/poap/` | Compiled output (JS bindings, ZKIR). Prover/verifier keys are generated locally, not committed |
 | [`contracts/src/test/`](contracts/src/test/) | Contract tests (simulator + Jest) |
 | [`contracts/src/witnesses.ts`](contracts/src/witnesses.ts) | Witness implementations (holder secret key, local token cache) |
-| [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, and serves the REST API (`/api/events`, `/api/tokens`, `/api/disclosure-requests`) from the same process |
+| [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, and serves the REST API (`/api/events`, `/api/tokens`, `/api/disclosure-requests`, `/api/credential-update-requests`) from the same process |
 | [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet or preprod) |
 | [`scripts/upgrade.ts`](scripts/upgrade.ts) | Upgrades the deployed contract's circuits in place (same address) |
 | [`deploy/production/`](deploy/production/) | Docker Compose stack + runbook for the API host |

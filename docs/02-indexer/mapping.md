@@ -59,7 +59,9 @@ are filled from the action being processed.
 | Circuit | Ledger change | Detected as | Written |
 |---|---|---|---|
 | `claim`, `mintTo` | New entries in `tokenOwner`, `tokenEvent`, `tokenIssuer`, `tokenMetadataURI`, `tokenPrivateMetadataCommit`; `events[id].minted` + 1; also `eventHolderToken`, `credentials`, `totalSupply` | Key added to `tokenOwner`; `events` entry updated | `INSERT INTO tokens` (the other four maps are looked up by the new token id), `minted_block`, `minted_tx`; `UPDATE events SET minted` |
-| `burn` | New entry in `burnedTokens`; credential leaf cleared; on a self-burn the `eventHolderToken` entry is removed | Key added to `burnedTokens` | `UPDATE tokens SET is_burned = TRUE, burned_block, burned_tx` |
+| `burn` | New entry in `burnedTokens`; credential leaf cleared; pending update request removed; on a self-burn the `eventHolderToken` entry is removed | Key added to `burnedTokens` | `UPDATE tokens SET is_burned = TRUE, burned_block, burned_tx`; see the update request row below |
+| `requestCredentialUpdate` | New or replaced entry in `credentialUpdateRequests` | Key added or value updated | Upsert into `credential_update_requests`: `status = 'pending'`, `payload_commit`, `requested_block`, `requested_tx`; `closed_*` cleared |
+| `dismissCredentialUpdate`, `burn` | Entry removed from `credentialUpdateRequests` | Key removed | `UPDATE credential_update_requests SET status, closed_block, closed_tx`: `'burned'` if the token is burned in the same state, otherwise `'dismissed'` |
 
 Before inserting a token the handler makes sure its issuer and event rows exist, inserting
 placeholders if not. With the contract as written this never triggers, because a token's event
