@@ -134,7 +134,7 @@ Metadata that leaks by design or that the contract cannot prevent.
 ```bash
 cd contracts
 npm run compact     # the tests run against the compiled output
-npm test            # 125 tests, about 15 seconds
+npm test            # 136 tests, about 20 seconds
 ```
 
 The suite is [`contracts/src/test/poap.test.ts`](../../contracts/src/test/poap.test.ts), driven
@@ -160,6 +160,8 @@ hostile caller" is modelled.
 | Ownership proof | Owner accepted; non-owner, unknown token, wrong event, burned or revoked token rejected; addressed request rejected for an owner who is not the recipient |
 | Anonymous proofs | Fresh and historic paths accepted; another holder's path, a self-built tree, a different event and a burned credential rejected; addressed request rejected for another holder and for a recipient with no credential; root history reset on burn; **the public transcript contains neither the pseudonym nor the leaf** |
 | Credential attributes | Valid proof by the recipient accepted; open request, **another holder with a genuinely qualifying credential**, false value, value outside the set, leaked openings used by another holder, holder without the attribute and revoked credential rejected |
+| Identity documents | `computeIdentityValue` is deterministic and rejects a zero salt; a holder proves their own document; **a borrowed key fails the identity check, even with the friend's salt**; a credential with several documents can be checked against any one of them |
+| Credential update requests | Holder files and replaces a request; only the token's holder can file; missing commitment, unknown or burned token and paused contract rejected; issuer or admin can dismiss, nobody else, and only while pending; re-issue (`burn` + `mintTo`) and a self-burn both clear the request |
 
 Tests that reject invalid private inputs are the ones to keep when refactoring: they are what
 shows an `assert` actually constrains something. Two are regression tests for exploits that

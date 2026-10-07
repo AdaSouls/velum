@@ -19,13 +19,14 @@ queryable copy of part of its public state in Postgres. The same process serves 
 | | |
 |---|---|
 | Contracts | Exactly one: the Velum contract at `CONTRACT_ADDRESS`. One indexer process and one database per contract address. |
-| Preprod address | `3ce0a48228880fa377d22d364a1ad19fee5cb6e26a8ed80de11d7ab07433ceef` (see [`deployments/preprod.md`](../../deployments/preprod.md)) |
+| Preprod address | `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a` (see [`deployments/preprod.md`](../../deployments/preprod.md)) |
 | Local devnet address | Whatever `scripts/deploy.ts` printed on the last run |
 | Network | Set by `MIDNIGHT_NETWORK_ID`; it must match the Midnight indexer the process connects to |
 
 ### What it stores
 
-Issuers, events, tokens, disclosure requests and single-use nullifiers. The exact fields are in
+Issuers, events, tokens, disclosure requests, credential update requests and single-use
+nullifiers. The exact fields are in
 the [shared data contract](../00-overview/data-contract.md).
 
 ### What it cannot see
@@ -151,4 +152,4 @@ return ledger(cs.data);                                       // ledger() from c
 | `src/poap-state.ts` | Turns a diff into SQL |
 | `src/db.ts` | Connection pool, migrations, cursor |
 | `src/api/` | REST routes |
-| `db/migrations/001_init.sql` | Schema |
+| `db/migrations/*.sql` | Schema; see [Data model](data-model.md#migrations) |

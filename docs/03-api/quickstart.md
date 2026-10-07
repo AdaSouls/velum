@@ -34,7 +34,7 @@ curl "https://velum-api.adasouls.io/api/events/$EVENT/tokens?includeBurned=false
 curl https://velum-api.adasouls.io/api/tokens/0
 ```
 
-That is the whole surface: events, tokens and disclosure requests. The
+That is the whole surface: events, tokens, disclosure requests and credential update requests. The
 [endpoint reference](endpoints.md) has every field.
 
 Three things to keep in mind from the start:
@@ -117,6 +117,28 @@ curl https://velum-api.adasouls.io/api/disclosure-requests/<requestId>
 curl "https://velum-api.adasouls.io/api/disclosure-requests?verifierPk=<verifier public key>"
 ```
 
+### List the update requests an issuer has to answer
+
+```bash
+curl "https://velum-api.adasouls.io/api/credential-update-requests?issuerPk=<issuer public key>&status=pending"
+```
+
+Each one names the token and carries `payloadCommit`. The request's content is not here: the
+holder sends it to the issuer off-chain, and the issuer checks it against `payloadCommit` before
+re-issuing or dismissing.
+
+### Check what happened to a holder's update request
+
+```bash
+curl https://velum-api.adasouls.io/api/credential-update-requests/<tokenId>
+```
+
+- `pending`: the issuer has not acted yet.
+- `dismissed`: the issuer or the admin closed it without re-issuing.
+- `burned`: the token was burned. If the issuer re-issued, the new credential is a new token
+  under the same `ownerPk`; look it up with `GET /api/tokens/owner/<pseudonym>`. A revocation or
+  a self-burn gives the same status.
+
 ### Follow new activity
 
 There is no webhook, stream or "since" filter. Poll the list endpoints and compare, using the
@@ -155,6 +177,8 @@ The API is not versioned. Changes so far, newest first, from the commit history 
 
 | Date | Change | Breaking? |
 |---|---|---|
+| 2026-10-07 | Added `GET /api/credential-update-requests` (filters `issuerPk`, `ownerPk`, `status`) and `GET /api/credential-update-requests/:tokenId` | No |
+| 2026-10-04 | Disclosure requests gained `recipientPk`; `GET /api/disclosure-requests` gained the `recipientPk` filter | No |
 | 2026-09-09 | Added `GET /api/disclosure-requests` and `GET /api/disclosure-requests/:requestId` | No |
 | 2026-09-08 | Events gained `privateAttributesRoot` | No |
 | 2026-08-18 | Tokens gained `tokenMetadataURI` and `tokenPrivateMetadataCommit`. `GET /api/tokens/:tokenId/attendance` now answers `410 Gone`: a token belongs to exactly one event (`firstEventId`). | **Yes** (attendance removed) |

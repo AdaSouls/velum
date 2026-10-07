@@ -76,6 +76,23 @@ Ledger: `disclosureRequests: Map<Bytes<32>, DisclosureRequest>` → table `discl
 | `recipient` (all zeros = open request) | `recipient_pk` (`NULL` = open) | `recipientPk` (`null` = open) |
 | — (publishing transaction) | `published_block`, `published_tx` | `publishedBlock`, `publishedTx` |
 
+## Credential update requests
+
+Ledger: `credentialUpdateRequests: Map<Uint<64>, Bytes<32>>` → table `credential_update_requests`
+→ `GET /api/credential-update-requests`, `GET /api/credential-update-requests/:tokenId`
+
+| Ledger | Table column | API field |
+|---|---|---|
+| map key (token id) | `token_id` | `tokenId` |
+| map value (commitment to the off-chain request) | `payload_commit` | `payloadCommit` |
+| entry present / removed | `status` | `status`: `pending` while on the ledger; `dismissed` or `burned` once removed |
+| — (latest `requestCredentialUpdate` transaction) | `requested_block`, `requested_tx` | `requestedBlock`, `requestedTx` |
+| — (transaction that removed it) | `closed_block`, `closed_tx` | `closedBlock`, `closedTx` |
+| `tokenOwner[id]`, `tokenIssuer[id]`, `tokenEvent[id]` | joined from `tokens` | `ownerPk`, `issuerPk`, `eventId` |
+
+The ledger only holds pending requests. The table keeps closed ones too, so the database knows
+more history than the current ledger state does.
+
 ## Stored but not served by the API
 
 | Ledger | Table | Notes |
@@ -104,6 +121,10 @@ No server-side component can have these:
 
 - Secret keys, and the link between a holder's pseudonyms under different organizers.
 - Attribute values, their randomness, Merkle paths.
+- Identity documents (country, type, number) and their salts. Only a salted hash of each is used,
+  as a credential attribute value.
+- The content of a credential update request (which document, the new data). The ledger has a
+  commitment to it; the request itself goes from the holder to the issuer off-chain.
 - Which holder made an anonymous proof (one answering an open request).
 - That a stateless proof happened at all (the Velum indexer sees no state change; the chain still
   records the transaction).

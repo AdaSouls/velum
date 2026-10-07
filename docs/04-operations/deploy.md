@@ -37,7 +37,7 @@ npm run compact --workspace contracts
 npm run compact:shell --workspace contracts
 docker compose -f devnet.yml up -d proof-server
 
-MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed of a funded wallet> \
+MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed of a funded wallet> SKIP_DEMO_EVENT=1 \
   npx tsx scripts/deploy.ts
 ```
 
@@ -45,7 +45,12 @@ MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed of a funded wallet> \
   `MN_TEST_ENVIRONMENT=preprod npx tsx scripts/wallet-info.ts`.
 - The first run on preprod waits for the wallet to replay the network's DUST history, which
   took 1.5–2 hours. Progress is saved in `.wallet-state/` and reused.
-- The deployment is staged: a circuit-less shell, then one transaction per verifier key.
+- The deployment is staged: a circuit-less shell, then one transaction per verifier key (20
+  today, about 25 seconds each on preprod).
+- `SKIP_DEMO_EVENT=1` leaves the contract empty. Without it the script also creates a demo
+  event, which has no image and is only useful on a local devnet.
+- `deploy.ts` overwrites `deployments/preprod.md` and `.env.preprod.local`. Back the env file up
+  first if it holds anything else, and merge the earlier deployments back into the record.
 - If it is interrupted after the shell is deployed, do not simply run `deploy.ts` again: it
   always starts by deploying a new shell. To finish staging on the address that already exists,
   run `CONTRACT_ADDRESS=<addr> npx tsx scripts/upgrade.ts --apply`, which inserts the circuits
@@ -62,7 +67,7 @@ cd /opt/velum/poap-midnight && git checkout <the commit from step 1>
 cd deploy/production
 cp .env.example .env && chmod 600 .env     # CONTRACT_ADDRESS, network, endpoints, CORS, DB password
 docker compose up -d --build
-docker compose logs -f indexer             # expect: applied 001_init.sql, [gql-ws] connected
+docker compose logs -f indexer             # expect: applied 001…004 .sql, [gql-ws] connected
 ```
 
 ### 3. ZK artifacts
@@ -90,7 +95,8 @@ the matching compiled contract, and deploy it. Its variables are listed in
 
 ```bash
 curl -s  https://$API_DOMAIN/health
-curl -s  https://$API_DOMAIN/api/events                              # the demo event
+curl -s  https://$API_DOMAIN/api/events                              # the demo event, or [] if deployed empty
+curl -s  https://$API_DOMAIN/api/credential-update-requests          # 200: the image has the current API
 curl -sI https://$API_DOMAIN/zk/poap/keys/claim.verifier | head -1   # HTTP/2 200
 ```
 
@@ -127,7 +133,7 @@ old contract; nothing migrates them.
 |---|---|
 | 1 | Deploy with `scripts/deploy.ts` (see [First deployment](#first-deployment)) |
 | 2 | API host: `git pull` to the matching commit, set the new `CONTRACT_ADDRESS` in `.env` |
-| 3 | ZK artifacts: `sync-zk.sh` + `rsync` |
+| 3 | ZK artifacts: `sync-zk.sh` + `rsync`, then compare the host's `/zk/poap/SHA256SUMS` with the local one |
 | 4 | **Reset the indexer database.** Its rows and cursor belong to the old contract: `docker compose down && docker volume rm velum_pgdata && docker compose up -d --build` |
 | 5 | Web app: new address, new compiled contract, redeploy |
 | 6 | Update `deployments/<network>.md` and the changelog |

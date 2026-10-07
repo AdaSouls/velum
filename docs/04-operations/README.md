@@ -21,7 +21,7 @@ There is no staging environment and no mainnet deployment.
 | | Local | Preprod ("production") |
 |---|---|---|
 | **Midnight network id** | `undeployed` | `preprod` |
-| **Contract address** | New on every `scripts/deploy.ts` run; written to `deployments/undeployed.md` and `.env.local` | `3ce0a48228880fa377d22d364a1ad19fee5cb6e26a8ed80de11d7ab07433ceef` ([record](../../deployments/preprod.md)) |
+| **Contract address** | New on every `scripts/deploy.ts` run; written to `deployments/undeployed.md` and `.env.local` | `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a` ([record](../../deployments/preprod.md)) |
 | **Node** | `midnight-node:1.0.2` in `devnet.yml`, `ws://127.0.0.1:9944` | Midnight's public preprod node |
 | **Midnight indexer** | `indexer-standalone:4.3.3` in `devnet.yml`, `http://127.0.0.1:8088/api/v4/graphql` | `https://indexer.preprod.midnight.network/api/v4/graphql` |
 | **Proof server** | `proof-server:8.1.3` in `devnet.yml`, `http://127.0.0.1:6300` | Each user's own, on their machine. For deployments: local, same image. |

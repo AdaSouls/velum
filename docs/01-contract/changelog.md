@@ -30,12 +30,18 @@ it needs an upgrade, a new deployment, or nothing.
   - `burn` also removes the token's pending request. Re-issuing is `burn` + `mintTo`, as before.
   - Indexer: new table `credential_update_requests` (migration `004`); API: new
     `/api/credential-update-requests` with `?issuerPk=`, `?ownerPk=`, `?status=` filters.
-  - `scripts/deploy.ts`: the two new circuits added to `PROOF_CIRCUIT_IDS`.
+  - `scripts/deploy.ts`: the two new circuits added to `PROOF_CIRCUIT_IDS`; new
+    `SKIP_DEMO_EVENT=1` option to deploy the contract empty.
 
   **Needs: new deployment.** New ledger field and two new circuits. Every circuit's keys change:
   the compiler lays the ledger out again when a field is added, whatever its position. New
   address, indexer database reset, and a frontend build with the new contract artifacts, zkir
-  and keys (all 20 circuits). Not deployed yet.
+  and keys (all 20 circuits).
+
+  **On-chain (preprod):** deployed 2026-10-07 (2026-10-06 22:32 UTC), address
+  `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a`. Deployed empty (no demo
+  event). The API host follows it since the same day; the frontend needs a build with the new
+  address and artifacts. See [`deployments/preprod.md`](../../deployments/preprod.md).
 
 - **Addressed disclosure requests.** `DisclosureRequest` gains a `recipient` field and
   `publishDisclosureRequest` a `recipient` argument: the holder pseudonym (`getHolderPk`) that
@@ -55,9 +61,8 @@ it needs an upgrade, a new deployment, or nothing.
   with the new contract artifacts.
 
   **On-chain (preprod):** deployed 2026-10-04, address
-  `5e303d805abf829e3595dca0402f5871490e4bc2336a65f440689c78ecd8b527`. The API host and the
-  frontend still point at the previous contract. See
-  [`deployments/preprod.md`](../../deployments/preprod.md).
+  `5e303d805abf829e3595dca0402f5871490e4bc2336a65f440689c78ecd8b527`. Replaced on 2026-10-07 by
+  the deployment above.
 - Structured documentation tags added to the contract (`@ledger`, `@witness`, `@circuit`, …) and
   the `docs/` folder created. **Needs: nothing.** Prover and verifier keys are byte-identical to
   the previous build; only line numbers in the generated `contract/index.js` changed.

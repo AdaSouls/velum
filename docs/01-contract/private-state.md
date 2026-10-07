@@ -60,8 +60,9 @@ As implemented in the `poap-frontend` repository at the time of writing:
 - **Password.** A recovery code generated automatically for each wallet and kept in the same
   browser, so connecting does not prompt for it. The code is shown to the user once to save.
   Accepted trade-off: anyone with access to that browser profile can read the key.
-- **Other local data.** The openings of private credential attributes received from organizers,
-  proof history and sharing preferences are kept in the browser's local storage.
+- **Other local data.** The openings of private credential attributes received from organizers
+  (including the salt of each identity attribute), proof history and sharing preferences are kept
+  in the browser's local storage.
 
 ## Backup and recovery (web app)
 
@@ -81,7 +82,7 @@ secret key.
 | Who lost their key | Consequence | What can still be done |
 |---|---|---|
 | **Holder** | Cannot prove ownership or attendance and cannot burn their own tokens. The tokens stay on-chain, owned by pseudonyms no one controls. | Start over with a new key (new pseudonyms). Claim public events again, or ask the organizer to `mintTo` the new pseudonym. The issuer or admin can revoke the orphaned token. A re-claim counts toward `maxSupply`. |
-| **Holder** (attribute openings only) | Cannot produce `proveCredentialAttribute` proofs. Plain attendance proofs still work if they know the credential's attribute root. | Ask the organizer to deliver the openings again. |
+| **Holder** (attribute openings only) | Cannot produce `proveCredentialAttribute` proofs. Plain attendance proofs still work if they know the credential's attribute root. | Ask the organizer to deliver the openings again. This includes identity attributes: without the salt, the holder cannot answer a verifier's identity check. |
 | **Organizer** | Cannot mint, deactivate or revoke for their events. | The admin can still `mintTo`, `deactivateEvent` and `burn` for any event. The organizer's identity cannot be moved to a new key. |
 | **Organizer** (openings only) | Hidden metadata can never be revealed, and event-level attributes can never be proven. | Nothing. The commitments stay on-chain unopened. |
 | **Admin** | No more `pause`, issuer moderation, event reactivation or admin revocations. `adminPk` is sealed and cannot be changed. | Keep the deployment wallet seed safe: the admin key is derived from it. |
@@ -95,7 +96,11 @@ act as that user, and for a holder, prove ownership of every credential the key 
 |---|---|
 | The secret key | Identity. Without it, credentials are unusable. |
 | Credential attribute openings (`fieldId`, `value`, `rand`, in tree order) and the attribute root | Needed to rebuild Merkle paths for attribute proofs |
+| The salt of each identity attribute | It is the attribute's opening material: the holder hands it to a verifier, who rebuilds the value from the document they checked |
 | For organizers: metadata and attribute openings for each event | Needed to reveal or prove later |
 | For verifiers: the members of each published set | Holders need them to build membership paths |
 
 The `tokens` cache does not need a backup; it can be rebuilt from the indexer.
+
+A credential update request needs nothing in private state. The holder keeps the off-chain
+request they sent the issuer only until it is answered; its commitment is on the ledger.

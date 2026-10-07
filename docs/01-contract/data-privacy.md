@@ -74,6 +74,8 @@ The contract never sees these. How they are stored and delivered is the applicat
 | Event attribute openings (`fieldId`, `value`, `rand` per field) | Organizer | Whoever should be able to prove about them |
 | Credential attribute openings | Organizer, at mint time | The recipient. The organizer knows them too. |
 | The accepted values behind a request's `setRoot` | Verifier | Holders, so they can build a membership path |
+| Identity document data (country, type, number) and the salt of each identity attribute | Organizer, at mint time; the holder | A verifier checking that document: the holder shows the document and gives them the salt |
+| The content of a credential update request (which document, the new data) | Holder | The issuer only, encrypted. The ledger holds a commitment to it. |
 | A holder's pseudonym for an organizer | Holder | The organizer, before a push-mint |
 | Content behind `metadataURI` | Organizer | Public |
 
@@ -130,6 +132,8 @@ compiler would reject any accidental ledger use of it.
 | `mintTo` | `eventId`, `recipientPk`, `tokenMetadataURI`, `tokenPrivateMetadataCommit` | Yes, stored | The mint is public |
 | `mintTo` | `credentialAttributesRoot` | Only hashed inside the credential leaf | The leaf must be on-chain for later proofs |
 | `burn` | `tokenId` | Yes | A burn is public |
+| `requestCredentialUpdate` | `tokenId`, `payloadCommit` | Yes, stored in `credentialUpdateRequests` | The issuer has to find the request and check the off-chain envelope against the commitment. The commitment reveals nothing about the content as long as the envelope is encrypted or otherwise unguessable. |
+| `dismissCredentialUpdate` | `tokenId` | Yes, the ledger key removed | Closing a request is public. Whether the issuer or the admin closed it is not. |
 | `revealPrivateMetadata`, `revealPrivateTokenMetadata` | id, `value`, `rand` | `value` is stored | Revealing is the purpose. Treat `rand` as public too after a reveal. |
 | `publishDisclosureRequest` | `label`, `eventId`, `fieldId`, `setRoot`, `recipient`, the derived request id | Yes, stored. `label` only as part of the request id hash. | A request is public, including who it is addressed to |
 | `proveAttributeMembership`, `proveAttributeMembershipOnce` | `requestId` | Yes, ledger key | The verifier must be able to find the answer to their request |
@@ -144,7 +148,8 @@ upgrade.
 ### Local helpers
 
 `computeEventId`, `computePrivateMetadataCommit`, `computeAttributeLeaf`,
-`computeCredentialLeaf` and `computeCredentialAttrLeaf` wrap their inputs in `disclose()`. These
+`computeCredentialLeaf`, `computeCredentialAttrLeaf` and `computeIdentityValue` wrap their inputs
+in `disclose()`. These
 circuits run on the caller's machine with no transaction, so nothing reaches the chain. The
 `disclose()` is there so the result can leave the circuit.
 
