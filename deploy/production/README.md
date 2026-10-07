@@ -16,7 +16,7 @@ Caddy terminates TLS (automatic Let's Encrypt) and is the only thing listening p
 ```
 https://$API_DOMAIN/health               → indexer
 https://$API_DOMAIN/api/events|tokens|…  → indexer
-https://$API_DOMAIN/api/ipfs/*, /api/backup, /api/credential-delivery, /api/disclosure-sets → ipfs-proxy (optional)
+https://$API_DOMAIN/api/ipfs/*, /api/backup, /api/credential-delivery, /api/disclosure-sets, /api/credential-update → ipfs-proxy (optional)
 https://$API_DOMAIN/zk/poap/…            → static ZK artifacts
 ```
 
