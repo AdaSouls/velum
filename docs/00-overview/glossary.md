@@ -43,9 +43,10 @@ official definition, the Midnight documentation is the authority.
 | **Event** | Something credentials are issued for. |
 | **Token / credential** | One issued credential: a set of ledger rows keyed by a sequential token id. Not a Midnight coin. |
 | **Disclosure request** | A question a verifier publishes on-chain so holders can answer it with a proof. |
+| **Credential request** | A question of up to four conditions about one holder's credential, published on-chain by a verifier. Always addressed. The holder answers all conditions in one proof, or none. |
 | **Identity value** | `H("velum:identity:v1:", country, document type, number, salt)`. A credential attribute that ties the credential to one identity document, so a verifier who checked the document can tell the credential is that person's. |
 | **Credential update request** | A holder's on-chain request that the issuer re-issue one of their credentials, e.g. after a document was renewed. The ledger holds only a commitment; the content goes to the issuer off-chain. |
-| **Re-issue** | `burn` followed by `mintTo` for the same holder. The only way to change a credential's attributes. |
+| **Re-issue** | `reissueCredential`: in one transaction, the issuer or the admin burns a live credential and mints a new one to the same holder. The only way to change a credential's attributes. |
 | **Revocation** | A burn by the issuer or the admin, as opposed to a self-burn by the holder. |
 | **Maintenance authority** | The key that can replace the contract's circuits in place. |
 | **Shell build** | A circuit-less compile of the contract used as the first step of deployment. |

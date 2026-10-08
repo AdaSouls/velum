@@ -126,6 +126,7 @@ const PROOF_CIRCUIT_IDS = [
   'claim',
   'mintTo',
   'burn',
+  'reissueCredential',
   'revealPrivateMetadata',
   'revealPrivateTokenMetadata',
   'publishDisclosureRequest',
@@ -133,7 +134,8 @@ const PROOF_CIRCUIT_IDS = [
   'proveAttributeMembershipOnce',
   'proveTokenOwnership',
   'proveEventAttendance',
-  'proveCredentialAttribute',
+  'publishCredentialRequest',
+  'proveCredentialAttributes',
   'requestCredentialUpdate',
   'dismissCredentialUpdate',
 ] as const;

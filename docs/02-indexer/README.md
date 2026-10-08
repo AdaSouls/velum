@@ -25,8 +25,8 @@ queryable copy of part of its public state in Postgres. The same process serves 
 
 ### What it stores
 
-Issuers, events, tokens, disclosure requests, credential update requests and single-use
-nullifiers. The exact fields are in
+Issuers, events, tokens, disclosure requests, credential requests, credential update requests
+and single-use nullifiers. The exact fields are in
 the [shared data contract](../00-overview/data-contract.md).
 
 ### What it cannot see
@@ -41,7 +41,7 @@ not of how carefully it is written:
 - It cannot see secret keys, attribute values, commitment openings or Merkle paths.
 - It cannot tell which holder made an anonymous proof.
 - It does not even notice stateless proofs (`proveTokenOwnership`, `proveEventAttendance`,
-  `proveCredentialAttribute`, `proveAttributeMembership`): they change no state, so they produce
+  `proveCredentialAttributes`, `proveAttributeMembership`): they change no state, so they produce
   no rows.
 
 What it *can* do is observe who queries the API. That is a privacy consideration for the API,

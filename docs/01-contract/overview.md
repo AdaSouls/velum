@@ -15,8 +15,9 @@ Velum separates **holding** a credential from **proving** something about it:
   circuit, the proof shows one of:
   - "I own token N of your event" (public proof),
   - "I own *some* valid token of your event" (anonymous proof),
-  - "…and a private attribute of my credential is one of the values you accept" (proof over a
-    hidden value, answerable only by the holder the verifier addressed).
+  - "…and the private attributes of my credential meet every condition you set" (proof over
+    hidden values, up to four conditions answered together, answerable only by the holder the
+    verifier addressed).
 - Organizers can attach private data to an event or to an individual credential, and either
   reveal it later or let it be proven about without ever revealing it.
 - An organizer can tie a credential to one or more of the holder's identity documents. A verifier
@@ -24,10 +25,13 @@ Velum separates **holding** a credential from **proving** something about it:
   not lent by someone else. Only a salted hash of the document is ever used.
 - A credential's attributes are fixed when it is issued. When one changes, the holder files an
   update request on-chain and the organizer re-issues the credential or dismisses the request.
+  A re-issue is one transaction: the old credential is burned and the new one minted to the same
+  holder, so the holder is never left without one.
 
 A verifier's question is either open, so any holder of the event can answer it, or addressed to
 one holder, so nobody else can answer in their place. Questions about a credential's private
-attribute are always addressed.
+attributes are a separate kind of request (a credential request). They are always addressed, and
+their conditions can only be answered together.
 
 What the anonymous proofs hide is which credential and which holder were involved; an attribute
 proof hides the attribute's value. What they do not hide is listed in [Public and private data](data-privacy.md).
@@ -36,10 +40,10 @@ proof hides the attribute's value. What they do not hide is listed in [Public an
 
 | Actor | What they do | Circuits |
 |---|---|---|
-| **Admin** | Deploys the contract. Moderates: pauses, verifies or blocks issuers, takes events down, revokes tokens. | `pause`, `unpause`, `registerIssuer`, `deactivateIssuer`, `deactivateEvent`, `reactivateEvent`, `mintTo`, `burn`, `dismissCredentialUpdate` |
-| **Organizer** (issuer) | Creates events and issues credentials for them. Can revoke the ones they issued, and re-issues or dismisses update requests for them. | `createEvent`, `deactivateEvent`, `mintTo`, `burn`, `dismissCredentialUpdate` |
-| **Holder** | Claims or receives credentials, proves things about them, can burn their own, and can ask the organizer to re-issue one. | `claim`, `burn`, `requestCredentialUpdate`, `proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttribute` |
-| **Verifier** | Publishes a question, open or addressed to one holder, then checks that a successful proof transaction answered it. | `publishDisclosureRequest` |
+| **Admin** | Deploys the contract. Moderates: pauses, verifies or blocks issuers, takes events down, revokes tokens. | `pause`, `unpause`, `registerIssuer`, `deactivateIssuer`, `deactivateEvent`, `reactivateEvent`, `mintTo`, `burn`, `reissueCredential`, `dismissCredentialUpdate` |
+| **Organizer** (issuer) | Creates events and issues credentials for them. Can revoke the ones they issued, and re-issues or dismisses update requests for them. | `createEvent`, `deactivateEvent`, `mintTo`, `burn`, `reissueCredential`, `dismissCredentialUpdate` |
+| **Holder** | Claims or receives credentials, proves things about them, can burn their own, and can ask the organizer to re-issue one. | `claim`, `burn`, `requestCredentialUpdate`, `proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttributes` |
+| **Verifier** | Publishes a question, open or addressed to one holder, then checks that a successful proof transaction answered it. | `publishDisclosureRequest`, `publishCredentialRequest` |
 | **Anyone who knows an opening** | Reveals committed metadata, or proves a predicate about an event-level attribute. | `revealPrivateMetadata`, `revealPrivateTokenMetadata`, `proveAttributeMembership`, `proveAttributeMembershipOnce` |
 
 Creating events is permissionless. The issuer registry is an optional "verified" badge plus a
@@ -75,7 +79,7 @@ Each authorization check is an `assert` inside the circuit:
 | Caller owns token N (public) | `holder_pk(tokenIssuer[N]) == tokenOwner[N]` |
 | Caller is token N's issuer | `derive_pk(local_sk()) == tokenIssuer[N]` |
 | Caller owns some token of the event (anonymous) | The credential leaf rebuilt from `local_sk` is in the `credentials` Merkle tree |
-| Caller is the holder a request is addressed to | The holder pseudonym rebuilt from `local_sk` equals `disclosureRequests[requestId].recipient` |
+| Caller is the holder a request is addressed to | The holder pseudonym rebuilt from `local_sk` equals `disclosureRequests[requestId].recipient`, or `credentialRequests[requestId].recipient` for a credential request |
 | Caller may reveal committed metadata | They supply a `(value, rand)` pair that opens the on-chain commitment. No identity check. |
 
 The proof convinces the chain that the prover *knows* a secret key that hashes to the stored

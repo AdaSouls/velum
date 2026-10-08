@@ -57,6 +57,22 @@ export type DisclosureRequest = {
   recipient: Uint8Array;
 };
 
+// A verifier-published question of up to four conditions about one holder's
+// credential, answered all together by proveCredentialAttributes — see
+// CredentialRequest in poap.compact. Always addressed, immutable once
+// published. An all-zero fieldId is an unused condition slot.
+export type CredentialCondition = {
+  fieldId: Uint8Array;
+  setRoot: Uint8Array;
+};
+
+export type CredentialRequest = {
+  verifier: Uint8Array;
+  eventId: Uint8Array;
+  recipient: Uint8Array;
+  conditions: CredentialCondition[];
+};
+
 export type LedgerView = {
   totalSupply: bigint;
   tokenOwner:                 Iterable<[bigint,    Uint8Array]>;
@@ -86,9 +102,13 @@ export type LedgerView = {
   // eventId/fieldId/setRoot it points at are public precisely because
   // they're readable here, not because the prover disclosed them.
   disclosureRequests: Iterable<[Uint8Array, DisclosureRequest]>;
+  // requestId → a multi-condition question for one holder (see
+  // CredentialRequest above). Written by publishCredentialRequest.
+  credentialRequests: Iterable<[Uint8Array, CredentialRequest]>;
   // tokenId → commitment to the holder's off-chain update request (see
   // requestCredentialUpdate in poap.compact). Only pending requests are on
-  // the ledger: dismissCredentialUpdate and burn remove them.
+  // the ledger: dismissCredentialUpdate, burn and reissueCredential remove
+  // them.
   credentialUpdateRequests: Iterable<[bigint, Uint8Array]>;
   isPaused: boolean;
   adminPk: Uint8Array;

@@ -59,7 +59,7 @@ npx tsx scripts/deploy.ts
 ```
 
 On the devnet this uses the pre-funded genesis wallet, so no seed is needed, and it finishes in
-a few minutes. It deploys the shell, inserts the 20 verifier keys one by one, and creates a demo
+a few minutes. It deploys the shell, inserts the 22 verifier keys one by one, and creates a demo
 event (skip it with `SKIP_DEMO_EVENT=1`). It writes:
 
 - `deployments/undeployed.md`: the address and the demo event id
@@ -81,6 +81,7 @@ Expected output:
 [db] applied 002_uint64_columns.sql
 [db] applied 003_disclosure_request_recipient.sql
 [db] applied 004_credential_update_requests.sql
+[db] applied 005_credential_requests_and_reissue.sql
 [api] listening on http://localhost:3001
 [sub] resuming from block 0
 [gql-ws] connected

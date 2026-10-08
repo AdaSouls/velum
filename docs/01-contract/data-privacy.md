@@ -39,6 +39,7 @@ Data lives in one of four places:
 | (holder, event) → token index | `eventHolderToken` | The key is a hash of two public values |
 | Credential tree: leaf hashes and roots | `credentials` | See [below](#the-credentials-tree) |
 | Disclosure requests: verifier's public key, event, field id, set root, recipient pseudonym (if addressed) | `disclosureRequests` | Anyone can see what verifiers ask, and of whom when a request is addressed |
+| Credential requests: verifier's public key, event, recipient pseudonym, and every condition's field id and set root | `credentialRequests` | Anyone can see what a verifier asks about a holder's credential, and of which pseudonym. Always addressed. |
 | Single-use nullifiers | `usedDisclosures` | Not linkable to a wallet |
 | Pending credential update requests: token id, commitment to the off-chain request | `credentialUpdateRequests` | Anyone can see that a token's holder asked its issuer for an update; the content (which document, the new number) is off-chain, encrypted to the issuer |
 | Revealed metadata digests | `eventRevealedMetadata`, `tokenRevealedMetadata` | Public once revealed, permanently |
@@ -58,10 +59,10 @@ These are passed to a circuit but never disclosed.
 
 | Data | Circuit | Notes |
 |---|---|---|
-| Attribute `value` and `rand` | `proveAttributeMembership`, `proveAttributeMembershipOnce`, `proveCredentialAttribute` | |
+| Attribute `value` and `rand` | `proveAttributeMembership`, `proveAttributeMembershipOnce`, `proveCredentialAttributes` (one pair per condition) | |
 | Attribute, set and credential Merkle paths | the same, plus `proveEventAttendance` | Only the credential path's *root* is disclosed |
-| Token id, holder pseudonym, credential leaf | `proveEventAttendance`, `proveCredentialAttribute` | This is what makes an open attendance proof anonymous. Answering an addressed request shows that its recipient answered, so the pseudonym is known there. |
-| The credential's attribute root | `proveEventAttendance`, `mintTo` | In `mintTo` it reaches the chain only hashed inside the credential leaf |
+| Token id, holder pseudonym, credential leaf | `proveEventAttendance`, `proveCredentialAttributes` | This is what makes an open attendance proof anonymous. Answering an addressed request shows that its recipient answered, so the pseudonym is known there. A credential request is always addressed. |
+| The credential's attribute root | `proveEventAttendance`, `proveCredentialAttributes`, `mintTo`, `reissueCredential` | In `proveCredentialAttributes` it is not an input: it is recomputed from the first condition's attribute path. In `mintTo` and `reissueCredential` it reaches the chain only hashed inside the credential leaf |
 | `isSoulbound` | `claim` | Goes to the `store_token` witness only |
 
 ### Off-chain, shared between parties
@@ -73,7 +74,7 @@ The contract never sees these. How they are stored and delivered is the applicat
 | Opening of an event's hidden metadata (`value`, `rand`) | Organizer | Whoever should be able to reveal it |
 | Event attribute openings (`fieldId`, `value`, `rand` per field) | Organizer | Whoever should be able to prove about them |
 | Credential attribute openings | Organizer, at mint time | The recipient. The organizer knows them too. |
-| The accepted values behind a request's `setRoot` | Verifier | Holders, so they can build a membership path |
+| The accepted values behind a request's `setRoot` (one set per condition for a credential request) | Verifier | Holders, so they can build a membership path |
 | Identity document data (country, type, number) and the salt of each identity attribute | Organizer, at mint time; the holder | A verifier checking that document: the holder shows the document and gives them the salt |
 | The content of a credential update request (which document, the new data) | Holder | The issuer only, encrypted. The ledger holds a commitment to it. |
 | A holder's pseudonym for an organizer | Holder | The organizer, before a push-mint |
@@ -112,7 +113,7 @@ public transcript the compiled contract produces for the call.
 | Disclosed value | Where | Actually on-chain? | Why it is acceptable |
 |---|---|---|---|
 | `derive_pk(local_sk())` | constructor | Yes, stored as `adminPk` | The admin is a public role |
-| `derive_pk(local_sk())` | `caller_pk()`, used by every admin/organizer check | Only in `createEvent` (stored as organizer) and `publishDisclosureRequest` (stored as verifier). In the checks it is compared inside the proof against a value already on the ledger. | Organizer and verifier are public roles. A `claim` does not put the caller's public key on-chain. |
+| `derive_pk(local_sk())` | `caller_pk()`, used by every admin/organizer check | Only in `createEvent` (stored as organizer) and in `publishDisclosureRequest` and `publishCredentialRequest` (stored as verifier). In the checks it is compared inside the proof against a value already on the ledger. | Organizer and verifier are public roles. A `claim` does not put the caller's public key on-chain. |
 | `H(sk, issuerId)` holder pseudonym | `holder_pk()` | In `claim`: stored as `tokenOwner`. In `burn`, `mintTo`, `proveTokenOwnership`: compared inside the proof. | Minting is public by design. The pseudonym is per organizer, so it does not link a holder across organizers. |
 | `H(sk, requestId)` nullifier | `disclosure_nullifier()` | Yes, added to `usedDisclosures` | Needed to block replays. It reveals neither the key nor the wallet, and differs per request. |
 
@@ -132,13 +133,16 @@ compiler would reject any accidental ledger use of it.
 | `mintTo` | `eventId`, `recipientPk`, `tokenMetadataURI`, `tokenPrivateMetadataCommit` | Yes, stored | The mint is public |
 | `mintTo` | `credentialAttributesRoot` | Only hashed inside the credential leaf | The leaf must be on-chain for later proofs |
 | `burn` | `tokenId` | Yes | A burn is public |
+| `reissueCredential` | `tokenId`, `newMetadataURI`, `newPrivateMetadataCommit` | Yes, ledger key and stored | A re-issue is public. That the new token replaces the old one is public too: same owner, same transaction. |
+| `reissueCredential` | `newCredentialAttributesRoot` | Only hashed inside the new credential leaf | As in `mintTo` |
 | `requestCredentialUpdate` | `tokenId`, `payloadCommit` | Yes, stored in `credentialUpdateRequests` | The issuer has to find the request and check the off-chain envelope against the commitment. The commitment reveals nothing about the content as long as the envelope is encrypted or otherwise unguessable. |
 | `dismissCredentialUpdate` | `tokenId` | Yes, the ledger key removed | Closing a request is public. Whether the issuer or the admin closed it is not. |
 | `revealPrivateMetadata`, `revealPrivateTokenMetadata` | id, `value`, `rand` | `value` is stored | Revealing is the purpose. Treat `rand` as public too after a reveal. |
 | `publishDisclosureRequest` | `label`, `eventId`, `fieldId`, `setRoot`, `recipient`, the derived request id | Yes, stored. `label` only as part of the request id hash. | A request is public, including who it is addressed to |
+| `publishCredentialRequest` | `label`, `eventId`, `recipient`, `conditions` (every field id and set root), the derived request id | Yes, stored. `label` only as part of the request id hash. | A request is public, including who it is addressed to and everything it asks |
 | `proveAttributeMembership`, `proveAttributeMembershipOnce` | `requestId` | Yes, ledger key | The verifier must be able to find the answer to their request |
 | `proveTokenOwnership` | `requestId`, `tokenId` | Yes, ledger keys | This is the public proof; use `proveEventAttendance` to hide the token |
-| `proveEventAttendance`, `proveCredentialAttribute` | `requestId`, the credential path's Merkle root | Yes | The chain has to check the root against the tree. The root is the same for every holder using that tree version. |
+| `proveEventAttendance`, `proveCredentialAttributes` | `requestId`, the credential path's Merkle root | Yes | The chain has to check the root against the tree. The root is the same for every holder using that tree version. |
 
 **Note on `isSoulbound`.** The `disclose()` around it in `claim` is not needed: the contract
 compiles without it (checked with compiler 0.31.1), and the value never reaches the ledger.
@@ -161,7 +165,7 @@ Nothing in this section is a bug. It is what the design gives away through metad
 
 ### What every transaction reveals
 
-- **Which circuit was called.** A transaction calling `proveCredentialAttribute` is visibly
+- **Which circuit was called.** A transaction calling `proveCredentialAttributes` is visibly
   different from one calling `proveEventAttendance`. Velum's own receipt checker relies on this.
 - **When it was called.**
 - **The ledger keys it touched.** Every map lookup puts its key in the public transcript. This is
@@ -184,13 +188,19 @@ Nothing in this section is a bug. It is what the design gives away through metad
 - **An addressed request has no anonymity set.** The request names one holder pseudonym on the
   ledger and only that holder can answer, so a successful proof shows that pseudonym answered.
   What stays hidden is what the proof was about: the token id and the attribute value.
-- **`proveCredentialAttribute` is never anonymous.** It only accepts addressed requests, so every
-  proof about a credential's private attribute is tied to a named pseudonym. The value itself
-  is not disclosed.
+- **`proveCredentialAttributes` is never anonymous.** A credential request is always addressed,
+  so every proof about a credential's private attributes is tied to a named pseudonym. The
+  values themselves are not disclosed, nor are their randomness, the Merkle paths or the token
+  id.
+- **A credential request shows the whole question.** Every condition's field id and set root,
+  the recipient pseudonym and the verifier's key are on the ledger. A successful proof shows
+  that the recipient met all of them; there is no partial answer to observe.
 - **Whether a token carries private attributes is visible.** Anyone can recompute the leaf a
   token would have with a zero attribute root and compare it with the tree.
 - **Set size.** A request whose accepted set has one member turns "is a member" into "has exactly
-  this value". The contract cannot enforce a minimum set size from a root.
+  this value". The contract cannot enforce a minimum set size from a root. The same holds for
+  each condition of a credential request. An identity condition is a one-value set on purpose;
+  the salt is what keeps the document from being guessed from its `setRoot`.
 - **Timing.** A proof submitted right after a mint, or right after a verifier hands a request to
   one specific person, points at that person regardless of the cryptography.
 - **Tree version.** The disclosed root identifies the state of the tree the path was built
@@ -208,6 +218,8 @@ Nothing in this section is a bug. It is what the design gives away through metad
   `eventHolderToken` entry), so an observer can tell them apart.
 - A revocation by the issuer and one by the admin are not distinguishable from the transcript.
   The same holds for `mintTo` and `deactivateEvent`.
+- A re-issue is visible as one: the transaction calls `reissueCredential`, burns one token and
+  mints another to the same pseudonym and event.
 
 ### Single-use proofs
 

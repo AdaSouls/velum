@@ -18,6 +18,8 @@ Examples use the preprod deployment.
 | [`GET /api/tokens/:tokenId/attendance`](#get-apitokenstokenidattendance) | Removed (`410`) |
 | [`GET /api/disclosure-requests`](#get-apidisclosure-requests) | List disclosure requests |
 | [`GET /api/disclosure-requests/:requestId`](#get-apidisclosure-requestsrequestid) | One disclosure request |
+| [`GET /api/credential-requests`](#get-apicredential-requests) | List credential requests |
+| [`GET /api/credential-requests/:requestId`](#get-apicredential-requestsrequestid) | One credential request |
 | [`GET /api/credential-update-requests`](#get-apicredential-update-requests) | List credential update requests |
 | [`GET /api/credential-update-requests/:tokenId`](#get-apicredential-update-requeststokenid) | A token's update request |
 
@@ -57,10 +59,11 @@ counts only the ones that are not burned.
 | `issuerPk` | hex string | `tokens.issuer_pk` | `tokenIssuer[id]` |
 | `firstEventId` | hex string | `tokens.first_event_id` | `tokenEvent[id]` |
 | `isBurned` | boolean | `tokens.is_burned` | presence in `burnedTokens` |
-| `mintedBlock` | number or `null` | `tokens.minted_block` | block of the `claim` / `mintTo` transaction |
+| `mintedBlock` | number or `null` | `tokens.minted_block` | block of the `claim` / `mintTo` / `reissueCredential` transaction |
 | `mintedTx` | string or `null` | `tokens.minted_tx` | hash of that transaction |
-| `burnedBlock` | number or `null` | `tokens.burned_block` | block of the `burn` transaction |
+| `burnedBlock` | number or `null` | `tokens.burned_block` | block of the `burn` or `reissueCredential` transaction |
 | `burnedTx` | string or `null` | `tokens.burned_tx` | hash of that transaction |
+| `replacesTokenId` | number or `null` | `tokens.replaces_token_id` | — (derived): the token this one replaced, when it was minted by `reissueCredential`; `null` otherwise |
 | `tokenMetadataURI` | string | `tokens.token_metadata_uri` | `tokenMetadataURI[id]` |
 | `tokenPrivateMetadataCommit` | hex string | `tokens.token_private_metadata_commit` | `tokenPrivateMetadataCommit[id]` |
 | `metadataURI` | string | `events.metadata_uri` (joined) | the parent event's `metadataURI` |
@@ -83,6 +86,31 @@ Use `tokenMetadataURI` to render the credential; `metadataURI` is the event's, f
 A request carries only the root of the accepted set. The set's members are shared by the
 verifier outside this API.
 
+### Credential request
+
+A verifier's question of up to four conditions about one holder's credential. The holder answers
+all of them in one proof (`proveCredentialAttributes`), or none.
+
+| API field | Type | Database column | Ledger origin |
+|---|---|---|---|
+| `requestId` | hex string | `credential_requests.request_id` | key of `credentialRequests` |
+| `verifierPk` | hex string | `credential_requests.verifier_pk` | `credentialRequests[id].verifier` |
+| `eventId` | hex string | `credential_requests.event_id` | `.eventId` |
+| `recipientPk` | hex string | `credential_requests.recipient_pk` | `.recipient`: the holder pseudonym (a token's `ownerPk`) that must answer. Never `null`: a credential request is always addressed |
+| `conditions` | array of `{ slot, fieldId, setRoot }` | `credential_requests.conditions` | `.conditions`: the used conditions, in order. Unused (all-zero) slots are left out |
+| `publishedBlock` | number or `null` | `credential_requests.published_block` | block of the `publishCredentialRequest` transaction |
+| `publishedTx` | string or `null` | `credential_requests.published_tx` | hash of that transaction |
+
+Each condition:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `slot` | number, `0` to `3` | Position of the condition in the on-chain vector, which is where its answer goes in `proveCredentialAttributes` |
+| `fieldId` | hex string | The credential attribute asked about |
+| `setRoot` | hex string | Merkle root of the accepted values for that attribute |
+
+As with disclosure requests, the sets' members are shared by the verifier outside this API.
+
 ### Credential update request
 
 | API field | Type | Database column | Ledger origin |
@@ -92,11 +120,12 @@ verifier outside this API.
 | `issuerPk` | hex string | `tokens.issuer_pk` | `tokenIssuer[tokenId]`: who should act on it |
 | `eventId` | hex string | `tokens.first_event_id` | `tokenEvent[tokenId]` |
 | `payloadCommit` | hex string | `credential_update_requests.payload_commit` | `credentialUpdateRequests[tokenId]`: commitment to the off-chain request |
-| `status` | `"pending"`, `"dismissed"` or `"burned"` | `credential_update_requests.status` | `pending` while on the ledger; `dismissed` after `dismissCredentialUpdate`; `burned` after `burn` (a re-issue, a revocation or a self-burn) |
+| `status` | `"pending"`, `"dismissed"`, `"burned"` or `"reissued"` | `credential_update_requests.status` | `pending` while on the ledger; `dismissed` after `dismissCredentialUpdate`; `reissued` after `reissueCredential`; `burned` after `burn` (a revocation or a self-burn) |
 | `requestedBlock` | number or `null` | `credential_update_requests.requested_block` | block of the latest `requestCredentialUpdate` |
 | `requestedTx` | string or `null` | `credential_update_requests.requested_tx` | hash of that transaction |
 | `closedBlock` | number or `null` | `credential_update_requests.closed_block` | block that removed it; `null` while pending |
 | `closedTx` | string or `null` | `credential_update_requests.closed_tx` | hash of that transaction |
+| `reissuedTokenId` | number or `null` | `credential_update_requests.reissued_token_id` | — (derived): for `reissued`, the token that replaced this one; `null` otherwise |
 
 The request's content (which document, the new data) never reaches the chain or this API: the
 holder sends it to the issuer off-chain, encrypted, and the issuer checks it against
@@ -274,6 +303,7 @@ curl https://velum-api.adasouls.io/api/tokens/0
   "mintedTx": "4855002cb08dd9431673990683a077289e60b11d5aae458267d0b090c5261fd6",
   "burnedBlock": null,
   "burnedTx": null,
+  "replacesTokenId": null,
   "tokenMetadataURI": "ipfs://bafkreihpzs55ta2stbkdf3r744kz77dmlid74xbo5wpj5xlssj7dvvdfoa",
   "tokenPrivateMetadataCommit": "0000000000000000000000000000000000000000000000000000000000000000",
   "metadataURI": "ipfs://bafkreihpzs55ta2stbkdf3r744kz77dmlid74xbo5wpj5xlssj7dvvdfoa"
@@ -353,6 +383,66 @@ curl https://velum-api.adasouls.io/api/disclosure-requests/22d45167fa682ed88d8bc
 
 ---
 
+## `GET /api/credential-requests`
+
+Every published credential request, by publication block ascending. Not paginated. A holder's
+wallet lists the ones addressed to its pseudonym; a verifier's tooling lists the ones it asked.
+Credential requests do not appear under `/api/disclosure-requests`.
+
+| Parameter | In | Required | Description |
+|---|---|---|---|
+| `verifierPk` | query | no | Only requests published by this public key |
+| `recipientPk` | query | no | Only requests addressed to this holder pseudonym |
+| `eventId` | query | no | Only requests about this event |
+
+| Status | Body |
+|---|---|
+| `200` | Array of [Credential request](#credential-request). `[]` if none. |
+| `500` | `{"error":"internal server error"}` |
+
+```bash
+curl "https://velum-api.adasouls.io/api/credential-requests?recipientPk=<holder pseudonym>"
+```
+
+```json
+[
+  {
+    "requestId": "<request id>",
+    "verifierPk": "<verifier public key>",
+    "eventId": "<event id>",
+    "recipientPk": "<holder pseudonym>",
+    "conditions": [
+      { "slot": 0, "fieldId": "<identity field id>", "setRoot": "<root of the one-value set>" },
+      { "slot": 1, "fieldId": "<grade field id>", "setRoot": "<root of the accepted grades>" }
+    ],
+    "publishedBlock": 2,
+    "publishedTx": "<transaction hash>"
+  }
+]
+```
+
+The example shows the shape only. The contract with credential requests is deployed on preprod,
+but the public API host does not follow it yet (see
+[`deployments/preprod.md`](../../deployments/preprod.md)).
+
+---
+
+## `GET /api/credential-requests/:requestId`
+
+One credential request. A holder's client reads this to learn what it is being asked to prove.
+
+| Parameter | In | Required | Description |
+|---|---|---|---|
+| `requestId` | path | yes | Request id, hex |
+
+| Status | Body |
+|---|---|
+| `200` | [Credential request](#credential-request) |
+| `404` | `{"error":"credential request not found"}` |
+| `500` | `{"error":"internal server error"}` |
+
+---
+
 ## `GET /api/credential-update-requests`
 
 Credential update requests, by request block ascending. Not paginated. An issuer's tooling lists
@@ -362,12 +452,12 @@ its pending ones; a holder's wallet checks its own.
 |---|---|---|---|
 | `issuerPk` | query | no | Only requests for tokens of this issuer |
 | `ownerPk` | query | no | Only requests filed by this holder pseudonym |
-| `status` | query | no | `pending`, `dismissed` or `burned` |
+| `status` | query | no | `pending`, `dismissed`, `burned` or `reissued` |
 
 | Status | Body |
 |---|---|
 | `200` | Array of [Credential update request](#credential-update-request). `[]` if none. |
-| `400` | `{"error":"status must be one of pending, dismissed, burned"}` |
+| `400` | `{"error":"status must be one of pending, dismissed, burned, reissued"}` |
 | `500` | `{"error":"internal server error"}` |
 
 ```bash

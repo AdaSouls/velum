@@ -12,6 +12,61 @@ it needs an upgrade, a new deployment, or nothing.
 
 ## Unreleased
 
+- **Multi-condition credential requests and atomic re-issue.** A verifier can ask several
+  things about one holder's credential as one question that can only be answered whole, and an
+  issuer can replace a credential in one transaction.
+  - New struct `CredentialCondition { fieldId, setRoot }` and
+    `CredentialRequest { verifier, eventId, recipient, conditions: Vector<4, CredentialCondition> }`.
+    Unused condition slots are all-zero; the first slot must be used. A credential request is
+    always addressed.
+  - New ledger field `credentialRequests: Map<Bytes<32>, CredentialRequest>`. Request ids are
+    derived as for disclosure requests (hash of the verifier's key and a label) but live in
+    their own map.
+  - New circuit `publishCredentialRequest(label, eventId, recipient, conditions)`: a verifier
+    pins a question of up to four conditions for one holder; returns the request id.
+  - New circuit `proveCredentialAttributes(requestId, values, rands, attributePaths,
+    setMembershipPaths, credPath)`: one proof, one transaction, answers every used condition of
+    the request against one credential. All or nothing: there is no proof of a subset. Writes
+    nothing; works while paused.
+    Why: with one request per condition, someone who borrowed a friend's key could have the
+    friend answer the grade request alone and show only that proof, skipping the identity
+    request. Now identity and grade are one request.
+  - **Breaking:** `proveCredentialAttribute` is removed. Requests published with
+    `publishDisclosureRequest` can no longer be used for a credential's private attributes; they
+    still serve `proveTokenOwnership`, `proveEventAttendance`, `proveAttributeMembership` and
+    `proveAttributeMembershipOnce`. The frontend must use `publishCredentialRequest` and
+    `proveCredentialAttributes`.
+  - New circuit `reissueCredential(tokenId, newMetadataURI, newPrivateMetadataCommit,
+    newCredentialAttributesRoot)`: the token's issuer or the admin replaces a live credential in
+    one transaction. The old token is burned, a new one is minted to the same holder pseudonym
+    and event, the pending update request on the old token is removed and the holder's
+    `eventHolderToken` slot moves to the new token. It does not increment the event's `minted`
+    counter and does not check `maxSupply`; `totalSupply` still grows. The event must be active
+    and not expired, and its issuer not blocked. Every check runs before any write, so a failed
+    re-issue leaves the old credential untouched.
+  - **Breaking:** re-issuing is `reissueCredential`, not `burn` + `mintTo`. As two transactions,
+    a mint that failed after the burn left the holder with no credential. `burn` is unchanged,
+    and `mintTo` after a revocation still works (that path does use up supply).
+  - Indexer (migration `005`): new table `credential_requests`; new column
+    `tokens.replaces_token_id`; new column `credential_update_requests.reissued_token_id` and
+    new status `reissued`. `burned` now only means a revocation or a self-burn.
+  - API: new `/api/credential-requests` (filters `?verifierPk=`, `?recipientPk=`, `?eventId=`)
+    and `/api/credential-requests/{requestId}`; new field `replacesTokenId` on tokens; new field
+    `reissuedTokenId` and status `reissued` on credential update requests, also accepted by
+    `?status=`.
+  - `scripts/deploy.ts`: `PROOF_CIRCUIT_IDS` updated (`proveCredentialAttribute` out;
+    `reissueCredential`, `publishCredentialRequest` and `proveCredentialAttributes` in).
+
+  **Needs: new deployment.** New ledger field, one circuit removed and three added. Every
+  circuit's keys change. New address, indexer database reset, and a frontend build with the new
+  contract artifacts, zkir and keys (all 22 circuits).
+
+  **On-chain (preprod):** deployed 2026-10-08 (05:26 UTC), address
+  `5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255`. Deployed empty (no demo
+  event). Not live yet: the API host and the frontend still follow the previous contract,
+  `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a`, until the frontend has a
+  build for this one. See [`deployments/preprod.md`](../../deployments/preprod.md).
+
 - **Identity documents and credential update requests.** Lets a verifier make sure a credential
   belongs to the person they checked, not to a friend who lent their key, and lets a holder ask
   for a credential to be re-issued when one of its documents changes.

@@ -279,6 +279,46 @@
       }
     },
     {
+      "name": "reissueCredential",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "tokenId",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 18446744073709551615
+          }
+        },
+        {
+          "name": "newMetadataURI",
+          "type": {
+            "type-name": "Opaque",
+            "tsType": "string"
+          }
+        },
+        {
+          "name": "newPrivateMetadataCommit",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "newCredentialAttributesRoot",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
       "name": "requestCredentialUpdate",
       "pure": false,
       "proof": true,
@@ -1000,7 +1040,66 @@
       }
     },
     {
-      "name": "proveCredentialAttribute",
+      "name": "publishCredentialRequest",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "label",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "eventId",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "recipient",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "conditions",
+          "type": {
+            "type-name": "Vector",
+            "length": 4,
+            "type": {
+              "type-name": "Struct",
+              "name": "CredentialCondition",
+              "elements": [
+                {
+                  "name": "fieldId",
+                  "type": {
+                    "type-name": "Bytes",
+                    "length": 32
+                  }
+                },
+                {
+                  "name": "setRoot",
+                  "type": {
+                    "type-name": "Bytes",
+                    "length": 32
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "proveCredentialAttributes",
       "pure": false,
       "proof": true,
       "arguments": [
@@ -1012,117 +1111,133 @@
           }
         },
         {
-          "name": "value",
+          "name": "values",
           "type": {
-            "type-name": "Bytes",
-            "length": 32
+            "type-name": "Vector",
+            "length": 4,
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
           }
         },
         {
-          "name": "rand",
+          "name": "rands",
           "type": {
-            "type-name": "Bytes",
-            "length": 32
+            "type-name": "Vector",
+            "length": 4,
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
           }
         },
         {
-          "name": "attributePath",
+          "name": "attributePaths",
           "type": {
-            "type-name": "Struct",
-            "name": "MerkleTreePath",
-            "elements": [
-              {
-                "name": "leaf",
-                "type": {
-                  "type-name": "Bytes",
-                  "length": 32
-                }
-              },
-              {
-                "name": "path",
-                "type": {
-                  "type-name": "Vector",
-                  "length": 8,
+            "type-name": "Vector",
+            "length": 4,
+            "type": {
+              "type-name": "Struct",
+              "name": "MerkleTreePath",
+              "elements": [
+                {
+                  "name": "leaf",
                   "type": {
-                    "type-name": "Struct",
-                    "name": "MerkleTreePathEntry",
-                    "elements": [
-                      {
-                        "name": "sibling",
-                        "type": {
-                          "type-name": "Struct",
-                          "name": "MerkleTreeDigest",
-                          "elements": [
-                            {
-                              "name": "field",
-                              "type": {
-                                "type-name": "Field"
+                    "type-name": "Bytes",
+                    "length": 32
+                  }
+                },
+                {
+                  "name": "path",
+                  "type": {
+                    "type-name": "Vector",
+                    "length": 8,
+                    "type": {
+                      "type-name": "Struct",
+                      "name": "MerkleTreePathEntry",
+                      "elements": [
+                        {
+                          "name": "sibling",
+                          "type": {
+                            "type-name": "Struct",
+                            "name": "MerkleTreeDigest",
+                            "elements": [
+                              {
+                                "name": "field",
+                                "type": {
+                                  "type-name": "Field"
+                                }
                               }
-                            }
-                          ]
+                            ]
+                          }
+                        },
+                        {
+                          "name": "goes_left",
+                          "type": {
+                            "type-name": "Boolean"
+                          }
                         }
-                      },
-                      {
-                        "name": "goes_left",
-                        "type": {
-                          "type-name": "Boolean"
-                        }
-                      }
-                    ]
+                      ]
+                    }
                   }
                 }
-              }
-            ]
+              ]
+            }
           }
         },
         {
-          "name": "setMembershipPath",
+          "name": "setMembershipPaths",
           "type": {
-            "type-name": "Struct",
-            "name": "MerkleTreePath",
-            "elements": [
-              {
-                "name": "leaf",
-                "type": {
-                  "type-name": "Bytes",
-                  "length": 32
-                }
-              },
-              {
-                "name": "path",
-                "type": {
-                  "type-name": "Vector",
-                  "length": 16,
+            "type-name": "Vector",
+            "length": 4,
+            "type": {
+              "type-name": "Struct",
+              "name": "MerkleTreePath",
+              "elements": [
+                {
+                  "name": "leaf",
                   "type": {
-                    "type-name": "Struct",
-                    "name": "MerkleTreePathEntry",
-                    "elements": [
-                      {
-                        "name": "sibling",
-                        "type": {
-                          "type-name": "Struct",
-                          "name": "MerkleTreeDigest",
-                          "elements": [
-                            {
-                              "name": "field",
-                              "type": {
-                                "type-name": "Field"
+                    "type-name": "Bytes",
+                    "length": 32
+                  }
+                },
+                {
+                  "name": "path",
+                  "type": {
+                    "type-name": "Vector",
+                    "length": 16,
+                    "type": {
+                      "type-name": "Struct",
+                      "name": "MerkleTreePathEntry",
+                      "elements": [
+                        {
+                          "name": "sibling",
+                          "type": {
+                            "type-name": "Struct",
+                            "name": "MerkleTreeDigest",
+                            "elements": [
+                              {
+                                "name": "field",
+                                "type": {
+                                  "type-name": "Field"
+                                }
                               }
-                            }
-                          ]
+                            ]
+                          }
+                        },
+                        {
+                          "name": "goes_left",
+                          "type": {
+                            "type-name": "Boolean"
+                          }
                         }
-                      },
-                      {
-                        "name": "goes_left",
-                        "type": {
-                          "type-name": "Boolean"
-                        }
-                      }
-                    ]
+                      ]
+                    }
                   }
                 }
-              }
-            ]
+              ]
+            }
           }
         },
         {
@@ -1280,8 +1395,8 @@
     {
       "name": "tokenIssuer",
       "index": [
-        1,
-        0
+        0,
+        3
       ],
       "exported": true,
       "storage": "Map",
@@ -1298,7 +1413,7 @@
       "name": "tokenMetadataURI",
       "index": [
         1,
-        1
+        0
       ],
       "exported": true,
       "storage": "Map",
@@ -1315,7 +1430,7 @@
       "name": "tokenPrivateMetadataCommit",
       "index": [
         1,
-        2
+        1
       ],
       "exported": true,
       "storage": "Map",
@@ -1332,7 +1447,7 @@
       "name": "tokenRevealedMetadata",
       "index": [
         1,
-        3
+        2
       ],
       "exported": true,
       "storage": "Map",
@@ -1349,7 +1464,7 @@
       "name": "eventHolderToken",
       "index": [
         1,
-        4
+        3
       ],
       "exported": true,
       "storage": "Map",
@@ -1366,7 +1481,7 @@
       "name": "events",
       "index": [
         1,
-        5
+        4
       ],
       "exported": true,
       "storage": "Map",
@@ -1446,7 +1561,7 @@
       "name": "eventRevealedMetadata",
       "index": [
         1,
-        6
+        5
       ],
       "exported": true,
       "storage": "Map",
@@ -1463,7 +1578,7 @@
       "name": "issuers",
       "index": [
         1,
-        7
+        6
       ],
       "exported": true,
       "storage": "Map",
@@ -1495,7 +1610,7 @@
       "name": "burnedTokens",
       "index": [
         1,
-        8
+        7
       ],
       "exported": true,
       "storage": "Map",
@@ -1511,7 +1626,7 @@
       "name": "usedDisclosures",
       "index": [
         1,
-        9
+        8
       ],
       "exported": true,
       "storage": "Set",
@@ -1524,7 +1639,7 @@
       "name": "disclosureRequests",
       "index": [
         1,
-        10
+        9
       ],
       "exported": true,
       "storage": "Map",
@@ -1569,6 +1684,73 @@
             "type": {
               "type-name": "Bytes",
               "length": 32
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "credentialRequests",
+      "index": [
+        1,
+        10
+      ],
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Struct",
+        "name": "CredentialRequest",
+        "elements": [
+          {
+            "name": "verifier",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "eventId",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "conditions",
+            "type": {
+              "type-name": "Vector",
+              "length": 4,
+              "type": {
+                "type-name": "Struct",
+                "name": "CredentialCondition",
+                "elements": [
+                  {
+                    "name": "fieldId",
+                    "type": {
+                      "type-name": "Bytes",
+                      "length": 32
+                    }
+                  },
+                  {
+                    "name": "setRoot",
+                    "type": {
+                      "type-name": "Bytes",
+                      "length": 32
+                    }
+                  }
+                ]
+              }
             }
           }
         ]

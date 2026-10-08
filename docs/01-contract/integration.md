@@ -308,8 +308,8 @@ const view = ledger(ContractState.deserialize(state.serialize()).data);
 view.events.lookup(eventId);
 ```
 
-For application queries (events, tokens by owner, disclosure requests, credential update
-requests), use Velum's own indexer
+For application queries (events, tokens by owner, disclosure requests, credential requests,
+credential update requests), use Velum's own indexer
 REST API in [`indexer/`](../../indexer/) instead of walking the ledger.
 
 ### Building Merkle paths
@@ -348,7 +348,7 @@ What the script does:
 1. Builds the wallet, registers its NIGHT for DUST generation if needed, and waits until it can
    pay fees. On preprod the first run replays the network's whole DUST history, which took
    1.5–2 hours. Progress is saved to `.wallet-state/`, so later runs only catch up.
-2. **Deploys the shell build.** A deployment carrying all 20 verifier keys is rejected by the
+2. **Deploys the shell build.** A deployment carrying all 22 verifier keys is rejected by the
    node for exceeding the block weight limit, so the script deploys the circuit-less shell first.
 3. **Inserts each circuit's verifier key** in its own transaction, signed by the contract's
    maintenance authority. If the run is interrupted here, finish it with

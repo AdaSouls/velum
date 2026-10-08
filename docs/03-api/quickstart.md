@@ -34,7 +34,8 @@ curl "https://velum-api.adasouls.io/api/events/$EVENT/tokens?includeBurned=false
 curl https://velum-api.adasouls.io/api/tokens/0
 ```
 
-That is the whole surface: events, tokens, disclosure requests and credential update requests. The
+That is the whole surface: events, tokens, disclosure requests, credential requests and credential
+update requests. The
 [endpoint reference](endpoints.md) has every field.
 
 Three things to keep in mind from the start:
@@ -111,6 +112,18 @@ curl https://velum-api.adasouls.io/api/disclosure-requests/<requestId>
 - Otherwise: "is the attribute `fieldId` of event `eventId` one of the values under `setRoot`?"
   The accepted values themselves come from the verifier, not from this API.
 
+### Read a question about one holder's credential
+
+```bash
+curl https://velum-api.adasouls.io/api/credential-requests/<requestId>
+curl "https://velum-api.adasouls.io/api/credential-requests?recipientPk=<holder pseudonym>"
+```
+
+A credential request holds up to four conditions, each "is the credential's private attribute
+`fieldId` one of the values under `setRoot`?". The holder answers all of them in one proof, or
+none. `slot` says where each answer goes in `proveCredentialAttributes`. These requests are not
+listed under `/api/disclosure-requests`.
+
 ### List the requests a verifier has published
 
 ```bash
@@ -135,9 +148,11 @@ curl https://velum-api.adasouls.io/api/credential-update-requests/<tokenId>
 
 - `pending`: the issuer has not acted yet.
 - `dismissed`: the issuer or the admin closed it without re-issuing.
-- `burned`: the token was burned. If the issuer re-issued, the new credential is a new token
-  under the same `ownerPk`; look it up with `GET /api/tokens/owner/<pseudonym>`. A revocation or
-  a self-burn gives the same status.
+- `reissued`: the issuer or the admin replaced the credential with `reissueCredential`. The new
+  credential is the token in `reissuedTokenId`, under the same `ownerPk`; that token carries
+  `replacesTokenId` pointing back.
+- `burned`: the token was burned without a replacement in the same transaction: a revocation or
+  a self-burn.
 
 ### Follow new activity
 
@@ -177,6 +192,7 @@ The API is not versioned. Changes so far, newest first, from the commit history 
 
 | Date | Change | Breaking? |
 |---|---|---|
+| Unreleased | Added `GET /api/credential-requests` (filters `verifierPk`, `recipientPk`, `eventId`) and `GET /api/credential-requests/:requestId`. Tokens gained `replacesTokenId`. Credential update requests gained `reissuedTokenId` and the status `reissued`, also accepted by `?status=` | No new required input. A request closed by a re-issue now reads `reissued`, not `burned` |
 | 2026-10-07 | Added `GET /api/credential-update-requests` (filters `issuerPk`, `ownerPk`, `status`) and `GET /api/credential-update-requests/:tokenId` | No |
 | 2026-10-04 | Disclosure requests gained `recipientPk`; `GET /api/disclosure-requests` gained the `recipientPk` filter | No |
 | 2026-09-09 | Added `GET /api/disclosure-requests` and `GET /api/disclosure-requests/:requestId` | No |

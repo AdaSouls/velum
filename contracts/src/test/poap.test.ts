@@ -9,7 +9,10 @@ import {
   ISSUER2_SK,
   makeEventId,
   buildMerklePath,
+  buildTreePaths,
   leafDigestField,
+  type CredentialAnswerArg,
+  type MerklePathArg,
 } from './poap-simulator.js';
 
 setNetworkId('undeployed');
@@ -1511,7 +1514,7 @@ describe('POAP contract — proveEventAttendance (anonymous ownership proof)', (
   });
 });
 
-describe('POAP contract — proveCredentialAttribute (addressed per-credential attribute)', () => {
+describe('POAP contract — proveCredentialAttributes (addressed per-credential attributes)', () => {
   const FIELD_TIER = new Uint8Array(32).fill(0x7e);
   const GOLD = new Uint8Array(32).fill(0x61);
   const SILVER = new Uint8Array(32).fill(0x62);
@@ -1531,7 +1534,7 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     sim.mintTo(eventA, user2Pk);
     const set = buildMerklePath(GOLD, 16);
     const requestId = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(REQ_LABEL, eventA, FIELD_TIER, set.rootBytes, user1Pk);
+      .publishCredentialRequest(REQ_LABEL, eventA, user1Pk, [{ fieldId: FIELD_TIER, setRoot: set.rootBytes }]);
     const attrPath = { leaf: attr.leaf, path: attr.path };
     const setPath = { leaf: set.leaf, path: set.path };
     return { sim, eventA, issuerPk, user1Pk, user2Pk, requestId, attr, set, attrPath, setPath };
@@ -1541,7 +1544,8 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     const { sim, issuerPk, requestId, attr, attrPath, setPath } = setUp();
     sim.asUser(USER1_SK);
     const credPath = sim.credentialPath(0n, issuerPk, attr.rootBytes);
-    expect(() => sim.proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(requestId,
+      [{ value: GOLD, rand: RAND, attributePath: attrPath, setMembershipPath: setPath }], credPath)).not.toThrow();
   });
 
   it('the same holder can also prove plain attendance with their attribute root', () => {
@@ -1557,7 +1561,8 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     const { sim, issuerPk, requestId, attr, attrPath, setPath } = setUp();
     sim.asUser(USER1_SK);
     const credPath = sim.credentialPath(0n, issuerPk, attr.rootBytes);
-    expect(() => sim.proveCredentialAttribute(requestId, SILVER, RAND, attrPath, setPath, credPath))
+    expect(() => sim.proveCredentialAttributes(requestId,
+      [{ value: SILVER, rand: RAND, attributePath: attrPath, setMembershipPath: setPath }], credPath))
       .toThrow('Path does not match the recomputed leaf');
   });
 
@@ -1570,40 +1575,38 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     sim.asUser(ISSUER1_SK).mintTo(eventB, user1Pk, 'ipfs://x', ZERO_32, attr.rootBytes); // token 2
     const goldSet = buildMerklePath(GOLD, 16);
     const reqB = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(new Uint8Array(32).fill(0x0f), eventB, FIELD_TIER, goldSet.rootBytes, user1Pk);
+      .publishCredentialRequest(new Uint8Array(32).fill(0x0f), eventB, user1Pk, [{ fieldId: FIELD_TIER, setRoot: goldSet.rootBytes }]);
     const silverSet = buildMerklePath(SILVER, 16); // prover's own set
     sim.asUser(USER1_SK);
-    expect(() => sim.proveCredentialAttribute(
-      reqB, SILVER, RAND, { leaf: attr.leaf, path: attr.path }, { leaf: silverSet.leaf, path: silverSet.path },
-      sim.credentialPath(2n, issuerPk, attr.rootBytes),
-    )).toThrow('Value is not a member of the requested set');
+    expect(() => sim.proveCredentialAttributes(reqB,
+      [{ value: SILVER, rand: RAND, attributePath: { leaf: attr.leaf, path: attr.path }, setMembershipPath: { leaf: silverSet.leaf, path: silverSet.path } }], sim.credentialPath(2n, issuerPk, attr.rootBytes))).toThrow('Value is not a member of the requested set');
   });
 
   it('another holder cannot reuse the leaked openings and path', () => {
     const { sim, issuerPk, requestId, attr, attrPath, setPath } = setUp();
     const user1CredPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, attr.rootBytes);
-    expect(() => sim.asUser(USER2_SK).proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, user1CredPath))
+    expect(() => sim.asUser(USER2_SK).proveCredentialAttributes(requestId,
+      [{ value: GOLD, rand: RAND, attributePath: attrPath, setMembershipPath: setPath }], user1CredPath))
       .toThrow('Request is addressed to another holder');
   });
 
   it('a holder without that attribute cannot prove it', () => {
     const { sim, eventA, issuerPk, user2Pk, set, attrPath, setPath } = setUp();
     const reqUser2 = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes, user2Pk);
+      .publishCredentialRequest(ADDRESSED_LABEL, eventA, user2Pk, [{ fieldId: FIELD_TIER, setRoot: set.rootBytes }]);
     sim.asUser(USER2_SK);
     // USER2's real credential has an all-zero attribute root; grafting
     // USER1's attribute tree onto it produces a leaf that isn't in the tree.
     const user2Path = sim.credentialPath(1n, issuerPk);
-    expect(() => sim.proveCredentialAttribute(reqUser2, GOLD, RAND, attrPath, setPath, user2Path))
+    expect(() => sim.proveCredentialAttributes(reqUser2,
+      [{ value: GOLD, rand: RAND, attributePath: attrPath, setMembershipPath: setPath }], user2Path))
       .toThrow("Path does not match this holder's credential");
   });
 
   it('rejects an open request: private attributes are only asked of one holder', () => {
-    const { sim, eventA, issuerPk, attr, set, attrPath, setPath } = setUp();
-    const open = sim.asUser(ADMIN_SK).publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes);
-    sim.asUser(USER1_SK);
-    const credPath = sim.credentialPath(0n, issuerPk, attr.rootBytes);
-    expect(() => sim.proveCredentialAttribute(open, GOLD, RAND, attrPath, setPath, credPath))
+    const { sim, eventA, set } = setUp();
+    expect(() => sim.asUser(ADMIN_SK)
+      .publishCredentialRequest(ADDRESSED_LABEL, eventA, ZERO_32, [{ fieldId: FIELD_TIER, setRoot: set.rootBytes }]))
       .toThrow('Request must be addressed to a holder');
   });
 
@@ -1617,24 +1620,26 @@ describe('POAP contract — proveCredentialAttribute (addressed per-credential a
     const attr3 = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_TIER, GOLD, RAND_3), 8);
     sim.asUser(ISSUER1_SK).mintTo(eventA, user3Pk, 'ipfs://x', ZERO_32, attr3.rootBytes);
     sim.asUser(ISSUER2_SK);
-    const proof = [
-      GOLD, RAND_3, { leaf: attr3.leaf, path: attr3.path }, setPath, sim.credentialPath(2n, issuerPk, attr3.rootBytes),
-    ] as const;
-    expect(() => sim.proveCredentialAttribute(requestId, ...proof))
+    const proof: [CredentialAnswerArg[], MerklePathArg] = [
+      [{ value: GOLD, rand: RAND_3, attributePath: { leaf: attr3.leaf, path: attr3.path }, setMembershipPath: setPath }],
+      sim.credentialPath(2n, issuerPk, attr3.rootBytes),
+    ];
+    expect(() => sim.proveCredentialAttributes(requestId, ...proof))
       .toThrow('Request is addressed to another holder');
     // The same proof is fine once a request is addressed to that holder.
     const set = buildMerklePath(GOLD, 16);
     const reqUser3 = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(ADDRESSED_LABEL, eventA, FIELD_TIER, set.rootBytes, user3Pk);
+      .publishCredentialRequest(ADDRESSED_LABEL, eventA, user3Pk, [{ fieldId: FIELD_TIER, setRoot: set.rootBytes }]);
     sim.asUser(ISSUER2_SK);
-    expect(() => sim.proveCredentialAttribute(reqUser3, ...proof)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(reqUser3, ...proof)).not.toThrow();
   });
 
   it('revocation: an issuer burn kills the attribute proof', () => {
     const { sim, issuerPk, requestId, attr, attrPath, setPath } = setUp();
     const credPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, attr.rootBytes);
     sim.asUser(ISSUER1_SK).burn(0n);
-    expect(() => sim.asUser(USER1_SK).proveCredentialAttribute(requestId, GOLD, RAND, attrPath, setPath, credPath))
+    expect(() => sim.asUser(USER1_SK).proveCredentialAttributes(requestId,
+      [{ value: GOLD, rand: RAND, attributePath: attrPath, setMembershipPath: setPath }], credPath))
       .toThrow('Credential not in tree');
   });
 });
@@ -1727,21 +1732,21 @@ describe('POAP contract — identity documents stop credential lending', () => {
   function askIdentity(sim: PoapSimulator, eventA: Uint8Array, recipient: Uint8Array, label: Uint8Array,
                        fieldId: Uint8Array, value: Uint8Array) {
     const set = buildMerklePath(value, 16);
-    const requestId = sim.asUser(ADMIN_SK).publishDisclosureRequest(label, eventA, fieldId, set.rootBytes, recipient);
+    const requestId = sim.asUser(ADMIN_SK).publishCredentialRequest(label, eventA, recipient, [{ fieldId: fieldId, setRoot: set.rootBytes }]);
     return { requestId, setPath: { leaf: set.leaf, path: set.path } };
   }
 
   it('the real holder proves both the GPA and that the credential is tied to the document checked', () => {
     const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
     const gpaSet = buildMerklePath(GPA_9, 16);
-    const gpaReq = sim.asUser(ADMIN_SK).publishDisclosureRequest(LABEL_GPA, eventA, FIELD_GPA, gpaSet.rootBytes, friendPk);
+    const gpaReq = sim.asUser(ADMIN_SK).publishCredentialRequest(LABEL_GPA, eventA, friendPk, [{ fieldId: FIELD_GPA, setRoot: gpaSet.rootBytes }]);
     const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, dniValue);
     sim.asUser(USER1_SK);
     const gpa = paths.gpa!;
-    expect(() => sim.proveCredentialAttribute(gpaReq, GPA_9, RAND_GPA,
-      { leaf: gpa.leaf, path: gpa.path }, { leaf: gpaSet.leaf, path: gpaSet.path }, credPath)).not.toThrow();
-    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
-      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(gpaReq,
+      [{ value: GPA_9, rand: RAND_GPA, attributePath: { leaf: gpa.leaf, path: gpa.path }, setMembershipPath: { leaf: gpaSet.leaf, path: gpaSet.path } }], credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(idReq.requestId,
+      [{ value: dniValue, rand: RAND_ID, attributePath: { leaf: paths.id.leaf, path: paths.id.path }, setMembershipPath: idReq.setPath }], credPath)).not.toThrow();
   });
 
   it('a borrowed key fails the identity check, even with the friend\'s salt', () => {
@@ -1751,13 +1756,13 @@ describe('POAP contract — identity documents stop credential lending', () => {
     const expected = PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, CANDIDATE_DNI, ID_SALT);
     const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, expected);
     sim.asUser(USER1_SK);
-    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
-      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath))
+    expect(() => sim.proveCredentialAttributes(idReq.requestId,
+      [{ value: dniValue, rand: RAND_ID, attributePath: { leaf: paths.id.leaf, path: paths.id.path }, setMembershipPath: idReq.setPath }], credPath))
       .toThrow('Set path does not match the hidden value');
     // Grafting the expected value onto the friend's real leaf breaks the attribute path instead.
     const forgedSet = buildMerklePath(expected, 16);
-    expect(() => sim.proveCredentialAttribute(idReq.requestId, expected, RAND_ID,
-      { leaf: paths.id.leaf, path: paths.id.path }, { leaf: forgedSet.leaf, path: forgedSet.path }, credPath))
+    expect(() => sim.proveCredentialAttributes(idReq.requestId,
+      [{ value: expected, rand: RAND_ID, attributePath: { leaf: paths.id.leaf, path: paths.id.path }, setMembershipPath: { leaf: forgedSet.leaf, path: forgedSet.path } }], credPath))
       .toThrow('Path does not match the recomputed leaf');
   });
 
@@ -1766,15 +1771,118 @@ describe('POAP contract — identity documents stop credential lending', () => {
     const idReq = askIdentity(sim, eventA, friendPk, LABEL_ID, FIELD_NATIONAL_ID, dniValue);
     const passportReq = askIdentity(sim, eventA, friendPk, LABEL_PASSPORT, FIELD_PASSPORT, passportValue);
     sim.asUser(USER1_SK);
-    expect(() => sim.proveCredentialAttribute(idReq.requestId, dniValue, RAND_ID,
-      { leaf: paths.id.leaf, path: paths.id.path }, idReq.setPath, credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(idReq.requestId,
+      [{ value: dniValue, rand: RAND_ID, attributePath: { leaf: paths.id.leaf, path: paths.id.path }, setMembershipPath: idReq.setPath }], credPath)).not.toThrow();
     const passport = paths.passport!;
-    expect(() => sim.proveCredentialAttribute(passportReq.requestId, passportValue, RAND_PASSPORT,
-      { leaf: passport.leaf, path: passport.path }, passportReq.setPath, credPath)).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(passportReq.requestId,
+      [{ value: passportValue, rand: RAND_PASSPORT, attributePath: { leaf: passport.leaf, path: passport.path }, setMembershipPath: passportReq.setPath }], credPath)).not.toThrow();
     // A document value can't answer for another document's field.
-    expect(() => sim.proveCredentialAttribute(passportReq.requestId, dniValue, RAND_ID,
-      { leaf: paths.id.leaf, path: paths.id.path }, passportReq.setPath, credPath))
+    expect(() => sim.proveCredentialAttributes(passportReq.requestId,
+      [{ value: dniValue, rand: RAND_ID, attributePath: { leaf: paths.id.leaf, path: paths.id.path }, setMembershipPath: passportReq.setPath }], credPath))
       .toThrow('Path does not match the recomputed leaf');
+  });
+
+  // ── Several conditions, one request, one proof ──────────────────────────
+
+  const LABEL_BOTH = new Uint8Array(32).fill(0x2e);
+  const pathOf = (p: MerklePathArg): MerklePathArg => ({ leaf: p.leaf, path: p.path });
+
+  // The verifier asks "is this the person on the document AND is the GPA 9?"
+  // as ONE request: [identity, gpa].
+  function askIdentityAndGpa(sim: PoapSimulator, eventA: Uint8Array, recipient: Uint8Array, identityValue: Uint8Array) {
+    const idSet = buildMerklePath(identityValue, 16);
+    const gpaSet = buildMerklePath(GPA_9, 16);
+    const requestId = sim.asUser(ADMIN_SK).publishCredentialRequest(LABEL_BOTH, eventA, recipient, [
+      { fieldId: FIELD_NATIONAL_ID, setRoot: idSet.rootBytes },
+      { fieldId: FIELD_GPA, setRoot: gpaSet.rootBytes },
+    ]);
+    return { requestId, idSetPath: pathOf(idSet), gpaSetPath: pathOf(gpaSet) };
+  }
+
+  it('one request with identity + GPA is answered by a single proof', () => {
+    const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
+    const req = askIdentityAndGpa(sim, eventA, friendPk, dniValue);
+    const stored = sim.getLedger().credentialRequests.lookup(req.requestId);
+    expect(stored.recipient).toEqual(friendPk);
+    expect(stored.conditions.map((c) => c.fieldId)).toEqual([FIELD_NATIONAL_ID, FIELD_GPA, ZERO_32, ZERO_32]);
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveCredentialAttributes(req.requestId, [
+      { value: dniValue, rand: RAND_ID, attributePath: pathOf(paths.id), setMembershipPath: req.idSetPath },
+      { value: GPA_9, rand: RAND_GPA, attributePath: pathOf(paths.gpa!), setMembershipPath: req.gpaSetPath },
+    ], credPath)).not.toThrow();
+  });
+
+  it('a borrowed key cannot answer the GPA and skip the identity: it is all or nothing', () => {
+    const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
+    // The verifier rebuilt the identity value from the CANDIDATE's document.
+    const expected = PoapSimulator.computeIdentityValue(ARG, NATIONAL_ID, CANDIDATE_DNI, ID_SALT);
+    const req = askIdentityAndGpa(sim, eventA, friendPk, expected);
+    sim.asUser(USER1_SK);
+    const gpaAnswer = { value: GPA_9, rand: RAND_GPA, attributePath: pathOf(paths.gpa!), setMembershipPath: req.gpaSetPath };
+    // The friend's genuine identity opening is not in the verifier's set.
+    expect(() => sim.proveCredentialAttributes(req.requestId, [
+      { value: dniValue, rand: RAND_ID, attributePath: pathOf(paths.id), setMembershipPath: req.idSetPath },
+      gpaAnswer,
+    ], credPath)).toThrow('Set path does not match the hidden value');
+    // Answering the GPA twice, in the identity slot too, doesn't open the identity leaf.
+    expect(() => sim.proveCredentialAttributes(req.requestId, [gpaAnswer, gpaAnswer], credPath))
+      .toThrow('Path does not match the recomputed leaf');
+    // Leaving the GPA slot as padding fails as well: every used condition is checked.
+    expect(() => sim.proveCredentialAttributes(req.requestId, [
+      { value: dniValue, rand: RAND_ID, attributePath: pathOf(paths.id), setMembershipPath: pathOf(buildMerklePath(dniValue, 16)) },
+    ], credPath)).toThrow();
+  });
+
+  it('conditions cannot be assembled from two different attribute trees', () => {
+    const { sim, eventA, friendPk, dniValue, paths, credPath } = issue('gpaAndNationalId');
+    const req = askIdentityAndGpa(sim, eventA, friendPk, dniValue);
+    sim.asUser(USER1_SK);
+    // A genuine-looking GPA leaf, but in a tree of its own rather than the credential's.
+    const strayGpa = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_GPA, GPA_9, RAND_GPA), 8);
+    expect(() => sim.proveCredentialAttributes(req.requestId, [
+      { value: dniValue, rand: RAND_ID, attributePath: pathOf(paths.id), setMembershipPath: req.idSetPath },
+      { value: GPA_9, rand: RAND_GPA, attributePath: pathOf(strayGpa), setMembershipPath: req.gpaSetPath },
+    ], credPath)).toThrow('Conditions must be answered from the same credential');
+  });
+
+  it('a request can carry four conditions, and only its recipient can answer it', () => {
+    const sim = new PoapSimulator(ADMIN_SK);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, 100n, 0n, false);
+    const issuerPk = sim.getCallerPk();
+    const friendPk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    const fields = [0x71, 0x72, 0x73, 0x74].map((b) => new Uint8Array(32).fill(b));
+    const values = ['a', 'b', 'c', 'd'].map(text32);
+    const rands = [0x81, 0x82, 0x83, 0x84].map((b) => new Uint8Array(32).fill(b));
+    const attrPaths = buildTreePaths(fields.map((f, i) => PoapSimulator.computeCredentialAttrLeaf(f, values[i], rands[i])), 8);
+    sim.asUser(ISSUER1_SK).mintTo(eventA, friendPk, 'ipfs://degree', ZERO_32, attrPaths[0].rootBytes);
+    const sets = values.map((v) => buildMerklePath(v, 16));
+    const requestId = sim.asUser(ADMIN_SK).publishCredentialRequest(
+      LABEL_BOTH, eventA, friendPk, fields.map((fieldId, i) => ({ fieldId, setRoot: sets[i].rootBytes })));
+    const answers = values.map((value, i) => (
+      { value, rand: rands[i], attributePath: pathOf(attrPaths[i]), setMembershipPath: pathOf(sets[i]) }));
+    const credPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, attrPaths[0].rootBytes);
+    expect(() => sim.asUser(USER2_SK).proveCredentialAttributes(requestId, answers, credPath))
+      .toThrow('Request is addressed to another holder');
+    expect(() => sim.asUser(USER1_SK).proveCredentialAttributes(requestId, answers, credPath)).not.toThrow();
+    // One wrong value among the four fails the whole proof.
+    const tampered = answers.map((a, i) => (i === 3 ? { ...a, value: values[0] } : a));
+    expect(() => sim.proveCredentialAttributes(requestId, tampered, credPath))
+      .toThrow('Path does not match the recomputed leaf');
+  });
+
+  it('publishing needs an existing event, a first condition, a fresh label and an unpaused contract', () => {
+    const { sim, eventA, friendPk, dniValue } = issue('gpaAndNationalId');
+    const condition = { fieldId: FIELD_NATIONAL_ID, setRoot: buildMerklePath(dniValue, 16).rootBytes };
+    sim.asUser(ADMIN_SK);
+    expect(() => sim.publishCredentialRequest(LABEL_BOTH, makeEventId(9), friendPk, [condition]))
+      .toThrow('Event does not exist');
+    expect(() => sim.publishCredentialRequest(LABEL_BOTH, eventA, friendPk, []))
+      .toThrow('Request needs at least one condition');
+    sim.publishCredentialRequest(LABEL_BOTH, eventA, friendPk, [condition]);
+    expect(() => sim.publishCredentialRequest(LABEL_BOTH, eventA, friendPk, [condition]))
+      .toThrow('Request already published');
+    sim.pause();
+    expect(() => sim.publishCredentialRequest(LABEL_ID, eventA, friendPk, [condition])).toThrow('Contract is paused');
   });
 });
 
@@ -1849,15 +1957,144 @@ describe('POAP contract — credential update requests', () => {
     // The updated credential proves the new document.
     const set = buildMerklePath(newValue, 16);
     const requestId = sim.asUser(ADMIN_SK)
-      .publishDisclosureRequest(new Uint8Array(32).fill(0x2d), eventA, FIELD_ID, set.rootBytes, user1Pk);
+      .publishCredentialRequest(new Uint8Array(32).fill(0x2d), eventA, user1Pk, [{ fieldId: FIELD_ID, setRoot: set.rootBytes }]);
     sim.asUser(USER1_SK);
-    expect(() => sim.proveCredentialAttribute(requestId, newValue, RAND, { leaf: attr.leaf, path: attr.path },
-      { leaf: set.leaf, path: set.path }, sim.credentialPath(1n, issuerPk, attr.rootBytes))).not.toThrow();
+    expect(() => sim.proveCredentialAttributes(requestId,
+      [{ value: newValue, rand: RAND, attributePath: { leaf: attr.leaf, path: attr.path }, setMembershipPath: { leaf: set.leaf, path: set.path } }], sim.credentialPath(1n, issuerPk, attr.rootBytes))).not.toThrow();
   });
 
   it('a self-burn also clears a pending request', () => {
     const { sim } = setUp();
     sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
     expect(sim.burn(0n).credentialUpdateRequests.member(0n)).toBe(false);
+  });
+});
+
+// ── Atomic re-issue ───────────────────────────────────────────────────────────
+
+describe('POAP contract — reissueCredential (burn + mint in one transaction)', () => {
+  const COMMIT = new Uint8Array(32).fill(0xc1);
+  const FIELD_ID = new Uint8Array(32).fill(0x49);
+  const RAND = new Uint8Array(32).fill(0x62);
+  const OLD_VALUE = text32('old-document');
+  const NEW_VALUE = text32('new-document');
+  const NOW = 1_000_000n;
+
+  // ISSUER1 push-mints USER1 a credential tied to OLD_VALUE (token 0) in an
+  // event with the given supply cap and expiration.
+  function setUp(maxSupply = 100n, expiration = 0n) {
+    const sim = new PoapSimulator(ADMIN_SK).setBlockTime(NOW);
+    const eventA = sim.asUser(ISSUER1_SK).createEvent(EVENT_A, maxSupply, expiration, false);
+    const issuerPk = sim.getCallerPk();
+    const user1Pk = sim.asUser(USER1_SK).getHolderPk(issuerPk);
+    const oldAttr = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_ID, OLD_VALUE, RAND), 8);
+    const newAttr = buildMerklePath(PoapSimulator.computeCredentialAttrLeaf(FIELD_ID, NEW_VALUE, RAND), 8);
+    sim.asUser(ISSUER1_SK).mintTo(eventA, user1Pk, 'ipfs://old', ZERO_32, oldAttr.rootBytes);
+    return { sim, eventA, issuerPk, user1Pk, oldAttr, newAttr };
+  }
+
+  function ask(sim: PoapSimulator, eventA: Uint8Array, recipient: Uint8Array, label: number, value: Uint8Array) {
+    const set = buildMerklePath(value, 16);
+    const requestId = sim.asUser(ADMIN_SK).publishCredentialRequest(
+      new Uint8Array(32).fill(label), eventA, recipient, [{ fieldId: FIELD_ID, setRoot: set.rootBytes }]);
+    return { requestId, setPath: { leaf: set.leaf, path: set.path } };
+  }
+
+  it('retires the old token and mints its replacement to the same holder', () => {
+    const { sim, eventA, user1Pk, newAttr } = setUp();
+    sim.asUser(USER1_SK).requestCredentialUpdate(0n, COMMIT);
+    const state = sim.asUser(ISSUER1_SK).reissueCredential(0n, 'ipfs://new', ZERO_32, newAttr.rootBytes);
+    expect(state.burnedTokens.member(0n)).toBe(true);
+    expect(state.burnedTokens.member(1n)).toBe(false);
+    expect(state.tokenOwner.lookup(1n)).toEqual(user1Pk);
+    expect(state.tokenEvent.lookup(1n)).toEqual(eventA);
+    expect(state.tokenIssuer.lookup(1n)).toEqual(state.tokenIssuer.lookup(0n));
+    expect(state.tokenMetadataURI.lookup(1n)).toBe('ipfs://new');
+    expect(state.credentialUpdateRequests.member(0n)).toBe(false);
+    expect(state.totalSupply).toBe(2n);
+  });
+
+  it('does not use up supply: minted stays the same, and a full event can still re-issue', () => {
+    const { sim, eventA, issuerPk } = setUp(1n);
+    expect(sim.getLedger().events.lookup(eventA).minted).toBe(1n);
+    const state = sim.asUser(ISSUER1_SK).reissueCredential(0n);
+    expect(state.events.lookup(eventA).minted).toBe(1n);
+    expect(state.burnedTokens.member(1n)).toBe(false);
+    // The event is still full for a first mint.
+    const user2Pk = sim.asUser(USER2_SK).getHolderPk(issuerPk);
+    expect(() => sim.asUser(ISSUER1_SK).mintTo(eventA, user2Pk)).toThrow('Event has reached maximum supply');
+    // And the replacement can itself be replaced.
+    expect(() => sim.reissueCredential(1n)).not.toThrow();
+    expect(sim.getLedger().events.lookup(eventA).minted).toBe(1n);
+  });
+
+  it('the new credential proves the new data; the old one stops proving', () => {
+    const { sim, eventA, issuerPk, user1Pk, oldAttr, newAttr } = setUp();
+    const oldReq = ask(sim, eventA, user1Pk, 0x31, OLD_VALUE);
+    const newReq = ask(sim, eventA, user1Pk, 0x32, NEW_VALUE);
+    const oldAnswer = [{ value: OLD_VALUE, rand: RAND, attributePath: { leaf: oldAttr.leaf, path: oldAttr.path }, setMembershipPath: oldReq.setPath }];
+    const oldCredPath = sim.asUser(USER1_SK).credentialPath(0n, issuerPk, oldAttr.rootBytes);
+    expect(() => sim.proveCredentialAttributes(oldReq.requestId, oldAnswer, oldCredPath)).not.toThrow();
+
+    sim.asUser(ISSUER1_SK).reissueCredential(0n, 'ipfs://new', ZERO_32, newAttr.rootBytes);
+
+    sim.asUser(USER1_SK);
+    expect(() => sim.proveCredentialAttributes(oldReq.requestId, oldAnswer, oldCredPath)).toThrow('Credential not in tree');
+    expect(() => sim.proveCredentialAttributes(newReq.requestId,
+      [{ value: NEW_VALUE, rand: RAND, attributePath: { leaf: newAttr.leaf, path: newAttr.path }, setMembershipPath: newReq.setPath }],
+      sim.credentialPath(1n, issuerPk, newAttr.rootBytes))).not.toThrow();
+  });
+
+  it('the holder keeps exactly one slot for the event: no extra claim, no second replacement of the old token', () => {
+    const { sim, eventA, user1Pk } = setUp();
+    sim.asUser(ISSUER1_SK).reissueCredential(0n);
+    expect(() => sim.reissueCredential(0n)).toThrow('Token already burned');
+    expect(() => sim.mintTo(eventA, user1Pk)).toThrow('Wallet already claimed this event');
+    // Revoking the replacement still allows a later mintTo, as with any revocation.
+    sim.burn(1n);
+    expect(() => sim.mintTo(eventA, user1Pk)).not.toThrow();
+  });
+
+  it('only the issuer or the admin can re-issue', () => {
+    const { sim } = setUp();
+    expect(() => sim.asUser(USER1_SK).reissueCredential(0n)).toThrow('Not authorized to re-issue this token');
+    expect(() => sim.asUser(ISSUER2_SK).reissueCredential(0n)).toThrow('Not authorized to re-issue this token');
+    expect(() => sim.asUser(ADMIN_SK).reissueCredential(0n)).not.toThrow();
+    expect(() => sim.reissueCredential(7n)).toThrow('Token does not exist');
+  });
+
+  it('a re-issue that cannot mint leaves the old credential untouched', () => {
+    const { sim, eventA, issuerPk, user1Pk, oldAttr } = setUp(100n, NOW + 100n);
+    const req = ask(sim, eventA, user1Pk, 0x31, OLD_VALUE);
+    const stillProves = () => {
+      sim.asUser(USER1_SK);
+      sim.proveCredentialAttributes(req.requestId,
+        [{ value: OLD_VALUE, rand: RAND, attributePath: { leaf: oldAttr.leaf, path: oldAttr.path }, setMembershipPath: req.setPath }],
+        sim.credentialPath(0n, issuerPk, oldAttr.rootBytes));
+    };
+
+    sim.asUser(ADMIN_SK).pause();
+    expect(() => sim.asUser(ISSUER1_SK).reissueCredential(0n)).toThrow('Contract is paused');
+    sim.asUser(ADMIN_SK).unpause();
+
+    sim.asUser(ISSUER1_SK).deactivateEvent(eventA);
+    expect(() => sim.reissueCredential(0n)).toThrow('Event is not active');
+    sim.asUser(ADMIN_SK).reactivateEvent(eventA);
+
+    sim.deactivateIssuer(issuerPk);
+    expect(() => sim.asUser(ISSUER1_SK).reissueCredential(0n)).toThrow('Issuer is deactivated');
+
+    expect(sim.getLedger().burnedTokens.member(0n)).toBe(false);
+    expect(sim.getLedger().totalSupply).toBe(1n);
+    expect(stillProves).not.toThrow();
+  });
+
+  it('is refused once the event is past its expiration, and the credential stays live', () => {
+    const { sim } = setUp(100n, NOW + 100n);
+    sim.setBlockTime(NOW + 100n);
+    expect(() => sim.asUser(ISSUER1_SK).reissueCredential(0n)).toThrow('Event has expired');
+    expect(sim.getLedger().burnedTokens.member(0n)).toBe(false);
+    // A plain revocation is still possible after expiration.
+    expect(() => sim.burn(0n)).not.toThrow();
   });
 });

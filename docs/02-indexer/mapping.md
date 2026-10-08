@@ -37,6 +37,9 @@ Consequences of working from the diff:
 - Two circuits with the same effect are indistinguishable in the database. `claim` and `mintTo`
   both appear as "a token was added"; an issuer revocation and a self-burn both appear as "a
   token was burned".
+- A re-issue is recognised by its shape, not by its name: in one state diff, a newly burned
+  token and a newly minted token with the same owner and event. `reissueCredential` is the only
+  circuit that does both in one transaction.
 - A call that changes nothing produces nothing.
 - Diffs are cumulative. If one action fails to process, the next successful one still picks up
   its changes, attributed to the later transaction.
@@ -60,8 +63,9 @@ are filled from the action being processed.
 |---|---|---|---|
 | `claim`, `mintTo` | New entries in `tokenOwner`, `tokenEvent`, `tokenIssuer`, `tokenMetadataURI`, `tokenPrivateMetadataCommit`; `events[id].minted` + 1; also `eventHolderToken`, `credentials`, `totalSupply` | Key added to `tokenOwner`; `events` entry updated | `INSERT INTO tokens` (the other four maps are looked up by the new token id), `minted_block`, `minted_tx`; `UPDATE events SET minted` |
 | `burn` | New entry in `burnedTokens`; credential leaf cleared; pending update request removed; on a self-burn the `eventHolderToken` entry is removed | Key added to `burnedTokens` | `UPDATE tokens SET is_burned = TRUE, burned_block, burned_tx`; see the update request row below |
-| `requestCredentialUpdate` | New or replaced entry in `credentialUpdateRequests` | Key added or value updated | Upsert into `credential_update_requests`: `status = 'pending'`, `payload_commit`, `requested_block`, `requested_tx`; `closed_*` cleared |
-| `dismissCredentialUpdate`, `burn` | Entry removed from `credentialUpdateRequests` | Key removed | `UPDATE credential_update_requests SET status, closed_block, closed_tx`: `'burned'` if the token is burned in the same state, otherwise `'dismissed'` |
+| `reissueCredential` | New entry in `burnedTokens` for the old token; new entries in the five token maps for the new one, with the same owner, event and issuer; old credential leaf cleared and new leaf written; `eventHolderToken` entry moved to the new token; pending update request removed; `totalSupply` + 1; `events[id].minted` unchanged | Key added to `burnedTokens` and key added to `tokenOwner` in the same diff, with the same owner and event | Old token: `UPDATE tokens SET is_burned = TRUE, burned_block, burned_tx`. New token: `INSERT INTO tokens`, then `UPDATE tokens SET replaces_token_id` to the old token id. `events.minted` is not touched. See the update request row below |
+| `requestCredentialUpdate` | New or replaced entry in `credentialUpdateRequests` | Key added or value updated | Upsert into `credential_update_requests`: `status = 'pending'`, `payload_commit`, `requested_block`, `requested_tx`; `closed_*` and `reissued_token_id` cleared |
+| `dismissCredentialUpdate`, `burn`, `reissueCredential` | Entry removed from `credentialUpdateRequests` | Key removed | `UPDATE credential_update_requests SET status, closed_block, closed_tx, reissued_token_id`: `'reissued'` with the new token id if the token is the old half of a re-issue pair in the same diff; otherwise `'burned'` if the token is burned in the same state; otherwise `'dismissed'` |
 
 Before inserting a token the handler makes sure its issuer and event rows exist, inserting
 placeholders if not. With the contract as written this never triggers, because a token's event
@@ -80,8 +84,9 @@ always exists first.
 | Circuit | Ledger change | Detected as | Written |
 |---|---|---|---|
 | `publishDisclosureRequest` | New entry in `disclosureRequests` | Key added | `INSERT INTO disclosure_requests` with `published_block`, `published_tx` |
+| `publishCredentialRequest` | New entry in `credentialRequests` | Key added | `INSERT INTO credential_requests` with `published_block`, `published_tx`. `conditions` holds the used conditions only, in order, as `{slot, fieldId, setRoot}`; all-zero slots are dropped |
 | `proveAttributeMembershipOnce` | New element in `usedDisclosures` | Element added to the set | `INSERT INTO disclosure_nullifiers` with `spent_block`, `spent_tx` |
-| `proveAttributeMembership`, `proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttribute` | None | Empty diff | Nothing. The cursor still advances. |
+| `proveAttributeMembership`, `proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttributes` | None | Empty diff | Nothing. The cursor still advances. |
 
 ### Not indexed
 
@@ -97,9 +102,9 @@ always exists first.
 ### Order within one action
 
 `applyStateDiff` runs the handlers in this order inside one database transaction: issuers →
-events → tokens → nullifiers → disclosure requests → credential update requests. The order
-satisfies the foreign keys (an event needs its issuer, a token and a disclosure request need
-their event, an update request needs its token). If any handler throws, the
+events → tokens → nullifiers → disclosure requests → credential requests → credential update
+requests. The order satisfies the foreign keys (an event needs its issuer; a token, a disclosure
+request and a credential request need their event; an update request needs its token). If any handler throws, the
 whole transaction rolls back.
 
 ## Type rules
@@ -115,6 +120,7 @@ whole transaction rolls back.
 | `Set<Bytes<32>>` | iterable of `Uint8Array` | one row per element | diff by hex; additions only |
 | `HistoricMerkleTree` (`credentials`) | not read | not stored | — |
 | struct (`EventRecord`, …) | object | columns | field by field |
+| `Vector<4, CredentialCondition>` (`CredentialRequest.conditions`) | array of 4 objects | one `JSONB` column | the used entries, each with its position as `slot` and its two `Bytes<32>` as hex |
 
 All hashes and identifiers are hex. Base64 is not used anywhere.
 
@@ -139,12 +145,14 @@ An entry counts as "updated" when the comparison function says it changed:
 | `events` | `isActive`, `minted`, `maxSupply`, `expiration`, `isPublicMint`, `metadataURI`, `organizer`, `privateAttributesRoot` (not `privateMetadataCommit`) |
 | `issuers` | `isActive`, `organizerPk` |
 | `disclosureRequests` | every field (they never change in practice) |
+| `credentialRequests` | only additions are used |
 | `credentialUpdateRequests` | the commitment: a holder filing again replaces it |
 | `tokenOwner` | only additions are used |
 | `burnedTokens` | only additions are used |
 
 Removed entries are used for one field only: `credentialUpdateRequests`, where a removal closes
-the request (`dismissed`, or `burned` if the token is in `burnedTokens` in the same state). For
+the request (`reissued` if the token was replaced by `reissueCredential` in the same diff,
+`burned` if it is otherwise in `burnedTokens` in the same state, else `dismissed`). For
 every other field they are computed and ignored, because the contract never removes anything
 else that is indexed.
 

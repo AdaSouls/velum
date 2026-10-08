@@ -17,7 +17,7 @@ chain never sees witness outputs or undisclosed arguments.
 
 ## Circuit reference
 
-The contract exports 28 circuits. 20 of them need a proof and a transaction.
+The contract exports 30 circuits. 22 of them need a proof and a transaction.
 
 ### State-changing (proof + transaction)
 
@@ -30,13 +30,15 @@ The contract exports 28 circuits. 20 of them need a proof and a transaction.
 | `deactivateEvent(eventId)` | Admin or organizer | Stops minting for the event |
 | `reactivateEvent(eventId)` | Admin | Resumes minting |
 | `claim(eventId, isSoulbound)` | Anyone but the organizer | Mints a token of a public event to the caller |
-| `mintTo(eventId, recipientPk, tokenMetadataURI, tokenPrivateMetadataCommit, credentialAttributesRoot)` | Admin or organizer | Mints a token to a recipient; re-issues after a revocation |
+| `mintTo(eventId, recipientPk, tokenMetadataURI, tokenPrivateMetadataCommit, credentialAttributesRoot)` | Admin or organizer | Mints a token to a recipient; also issues a replacement after a revocation |
 | `burn(tokenId)` | Owner, issuer or admin | Burns or revokes a token; removes its pending update request |
+| `reissueCredential(tokenId, newMetadataURI, newPrivateMetadataCommit, newCredentialAttributesRoot)` | Issuer or admin | Replaces a live credential with a new one for the same holder, in one transaction; removes its pending update request |
 | `requestCredentialUpdate(tokenId, payloadCommit)` | Token owner | Files or replaces a request to re-issue the credential |
 | `dismissCredentialUpdate(tokenId)` | Issuer or admin | Closes a pending update request without re-issuing |
 | `revealPrivateMetadata(eventId, value, rand)` | Anyone with the opening | Publishes an event's committed metadata digest |
 | `revealPrivateTokenMetadata(tokenId, value, rand)` | Anyone with the opening | Publishes a token's committed metadata digest |
 | `publishDisclosureRequest(label, eventId, fieldId, setRoot, recipient)` | Anyone | Pins a verifier's question, open or addressed to one holder; returns its id |
+| `publishCredentialRequest(label, eventId, recipient, conditions)` | Anyone | Pins a question of up to four conditions about one holder's credential; returns its id |
 | `proveAttributeMembershipOnce(requestId, value, rand, attributePath, setMembershipPath)` | Anyone with the opening | Proof below, plus a single-use nullifier |
 
 ### Proof-only (proof + transaction, no ledger writes)
@@ -44,16 +46,20 @@ The contract exports 28 circuits. 20 of them need a proof and a transaction.
 These signal success by not failing. A verifier looks for a confirmed transaction that called the
 circuit with their `requestId`. They also work while the contract is paused.
 
-A request is either **open** (`recipient` all zeros: any holder of the event can answer) or
-**addressed** (`recipient` is a holder pseudonym: only that holder can answer). The three holder
-proofs enforce the recipient of an addressed request. `proveCredentialAttribute` accepts addressed
-requests only.
+A disclosure request is either **open** (`recipient` all zeros: any holder of the event can
+answer) or **addressed** (`recipient` is a holder pseudonym: only that holder can answer).
+`proveTokenOwnership` and `proveEventAttendance` enforce the recipient of an addressed request.
+
+A **credential request** is a separate kind, published with `publishCredentialRequest` and kept
+in its own map. It is always addressed and holds up to four conditions, which
+`proveCredentialAttributes` answers all together. A disclosure request cannot be used for a
+credential's private attributes.
 
 | Circuit | Proves | Becomes public |
 |---|---|---|
 | `proveTokenOwnership(requestId, tokenId)` | Caller owns live token N of the request's event, and is the recipient if the request is addressed | request id, token id |
 | `proveEventAttendance(requestId, credAttrRoot, credPath)` | Caller owns some live token of the request's event, and is the recipient if the request is addressed | request id, a credentials-tree root |
-| `proveCredentialAttribute(requestId, value, rand, attributePath, setMembershipPath, credPath)` | Caller is the request's recipient, owns a live token of its event, and the credential's private attribute is in the request's set | request id, a credentials-tree root; through the request, who answered |
+| `proveCredentialAttributes(requestId, values, rands, attributePaths, setMembershipPaths, credPath)` | Caller is the credential request's recipient, owns a live token of its event, and every condition of the request holds for the private attributes of that one credential | request id, a credentials-tree root; through the request, who answered |
 | `proveAttributeMembership(requestId, value, rand, attributePath, setMembershipPath)` | An event-level private attribute is in the request's set | request id |
 
 ### Local helpers (no proof, no transaction)
@@ -78,7 +84,7 @@ need a circuit context because they call a witness, and they are not part of the
 Not exported; they exist only inside other circuits: `derive_pk`, `caller_pk`, `holder_pk`,
 `holder_secret_pk`, `is_admin`, `event_key`, `holder_event_key`, `credential_leaf`,
 `credential_attr_leaf`, `attribute_leaf_hash`, `disclosure_request_key`, `disclosure_nullifier`,
-`mintTokenTo`.
+`mintTokenTo`, `check_credential_condition`.
 
 ---
 
@@ -167,8 +173,8 @@ recipient's private state is not touched; they find the token through the indexe
 2. Decide who may answer. To address the request to one person, get their holder pseudonym for
    the event's issuer: they read it with `getHolderPk(issuerId)` and hand it over, and it is the
    `ownerPk` of their token in the API, so it can be checked before publishing. For an open
-   request, use an all-zero `recipient`. A question about a credential's private attribute
-   (flow 7) must be addressed.
+   request, use an all-zero `recipient`. A question about a credential's private attributes is
+   not a disclosure request: publish it with `publishCredentialRequest` (flow 7).
 3. Call `publishDisclosureRequest(label, eventId, fieldId, setRoot, recipient)`.
 4. Give the returned `requestId` to the holder, together with the list of accepted values so they
    can build a membership path.
@@ -229,29 +235,57 @@ which pseudonym. For an addressed request the pseudonym is known, since only the
 answer; the token id still stays out of the transcript. The tree is historic, so a path built before later mints still verifies. A burn
 resets the root history: paths built before it stop working and must be rebuilt.
 
-### 7. Prove a private credential attribute (addressed)
+### 7. Prove private credential attributes (addressed, all or nothing)
 
-**Locally**
+A credential request holds up to four conditions. Each one asks: is the holder's private
+`fieldId` attribute a member of the set rooted at `setRoot`? The conditions can only be answered
+together, in one proof, against one credential.
 
-1. From the openings received at mint time, rebuild the credential's attribute tree and get the
-   depth-8 path of the requested field.
-2. Find your value in the verifier's set and get its depth-16 path.
+**Locally (verifier)**
+
+1. For each condition, build a depth-16 Merkle tree over the accepted values and keep its root.
+2. Get the holder's pseudonym for the event's issuer, as in flow 4. A credential request is
+   always addressed.
+3. Fill the four condition slots. An unused slot is all zeros (`fieldId` and `setRoot`). The
+   first slot must be used.
+4. Call `publishCredentialRequest(label, eventId, recipient, conditions)`.
+5. Give the returned `requestId` to the holder, together with each condition's list of accepted
+   values.
+
+**Locally (holder)**
+
+1. From the openings received at mint time, rebuild the credential's attribute tree. For each
+   used condition, get the depth-8 path of its field.
+2. For each used condition, find your value in that condition's set and get its depth-16 path.
 3. Get your credential path as in flow 6.
-4. Call `proveCredentialAttribute(requestId, value, rand, attributePath, setMembershipPath, credPath)`.
+4. Fill the four entries of `values`, `rands`, `attributePaths` and `setMembershipPaths`, each
+   answer in the same slot as its condition. For an unused slot pass a zero value, a zero rand
+   and any well-formed dummy paths of the right depth. The circuit ignores them.
+5. Call `proveCredentialAttributes(requestId, values, rands, attributePaths, setMembershipPaths, credPath)`.
 
 **Verified on-chain**
 
-- The request and its event exist.
-- The request is addressed (an open request is rejected), and the caller's pseudonym, rebuilt
-  from their secret key, equals its `recipient`.
-- `(fieldId from the request, value, rand)` hashes to the attribute path's leaf.
-- The attribute path's root, combined with the event and the caller's pseudonym, gives the
-  credential path's leaf. The attribute root is never an input: it is recomputed, so only
-  openings the organizer committed for this holder work.
-- The credential path's root is known to the `credentials` tree.
-- `value` is the set path's leaf and that path's root equals the request's `setRoot`.
+- `publishCredentialRequest`: not paused; the event exists; the recipient is not all zeros; the
+  first condition is used; no credential request exists yet with id `H(verifierPk, label)`. As in
+  flow 4, the recipient is not checked against `tokenOwner`.
+- `proveCredentialAttributes`:
+  - The request and its event exist.
+  - The caller's pseudonym, rebuilt from their secret key, equals the request's `recipient`.
+  - The first condition's attribute path gives the credential's attribute root. That root,
+    combined with the event and the caller's pseudonym, gives the credential path's leaf. The
+    attribute root is never an input: it is recomputed, so only openings the organizer committed
+    for this holder work.
+  - The credential path's root is known to the `credentials` tree.
+  - For every used condition: `(fieldId from the condition, value, rand)` hashes to its attribute
+    path's leaf; that path leads to the same attribute root; `value` is its set path's leaf and
+    that path's root equals the condition's `setRoot`.
 
-**The verifier learns** that some holder of the event has an attribute in the accepted set.
+**All or nothing.** The circuit takes the whole request, so there is no proof of a subset of its
+conditions. All conditions are checked against a single attribute root, so they cannot be
+assembled from two credentials. If one condition fails, nothing is sent.
+
+**The verifier learns** that the holder the request is addressed to has a live credential of the
+event whose private attributes meet every condition. Not the values, and not which token.
 
 ### 8. Prove an event-level attribute
 
@@ -277,24 +311,41 @@ the content is meant to become public; use the proofs in flows 7 and 8 when it i
 
 ### 10. Burn, revoke and re-issue
 
-**Locally:** call `burn(tokenId)`.
+**Locally:** call `burn(tokenId)` to invalidate a credential, or
+`reissueCredential(tokenId, newMetadataURI, newPrivateMetadataCommit, newCredentialAttributesRoot)`
+to replace a live one with an updated one for the same holder. For a re-issue, build the new
+attribute tree and deliver the new openings as in flow 3.
 
 **Verified on-chain**
 
-- Not paused; the token exists and is not already burned.
-- The caller is the owner (pseudonym matches), the token's issuer, or the admin.
+- `burn`: not paused; the token exists and is not already burned; the caller is the owner
+  (pseudonym matches), the token's issuer, or the admin. Nothing about the event is checked, so
+  a burn also works when the event is expired, full or deactivated.
+- `reissueCredential`: not paused; the token exists and is not already burned; the caller is the
+  token's issuer or the admin; the event is active and not past its expiration; the issuer is
+  not blocked; the new token id is below 2^20. `maxSupply` is not checked. Every check runs
+  before any write, so a failed re-issue leaves the old credential untouched.
 
 **Result**
 
-| | Self-burn (owner) | Revocation (issuer or admin) |
-|---|---|---|
-| `burnedTokens[tokenId]` | set | set |
-| Credential leaf | cleared, root history reset | cleared, root history reset |
-| `eventHolderToken` slot | removed: the holder can `claim` again | kept: the holder cannot `claim` again |
-| Replacement | holder claims again | issuer or admin calls `mintTo` for the same recipient |
+| | Self-burn (owner) | Revocation (issuer or admin) | Re-issue (issuer or admin) |
+|---|---|---|---|
+| `burnedTokens[tokenId]` | set | set | set |
+| Credential leaf | cleared, root history reset | cleared, root history reset | cleared; new leaf at the new token id; root history reset |
+| `eventHolderToken` slot | removed: the holder can `claim` again | kept: the holder cannot `claim` again | moved to the new token |
+| Pending update request | removed | removed | removed |
+| Event's `minted` counter | unchanged | unchanged | unchanged |
+| Replacement | holder claims again | issuer or admin calls `mintTo` for the same recipient | minted in the same transaction, to the same pseudonym and event |
 
 `totalSupply` and the event's `minted` counter are never decremented, so a burned token still
-counts toward `maxSupply`.
+counts toward `maxSupply`. A replacement issued with `mintTo` after a revocation is a new mint:
+it increments `minted` and is checked against `maxSupply`. A re-issue is not: it leaves `minted`
+as it is, so a full event can still re-issue. `totalSupply` grows in both cases, since it is the
+token id sequence.
+
+**Why one transaction.** As two (`burn`, then `mintTo`), a mint that failed after the burn went
+through (the event expired or was deactivated in between, the issuer was blocked, the supply
+filled up) left the holder with no credential at all.
 
 ### 11. Moderation
 
@@ -303,7 +354,7 @@ counts toward `maxSupply`.
 | Stop everything | `pause` | Yes, `unpause` |
 | Take an event down | `deactivateEvent` (admin or organizer) | Only by the admin, `reactivateEvent` |
 | Block an organizer | `deactivateIssuer` | No. A blocked key cannot be registered again |
-| Revoke a credential | `burn` | No, but a replacement can be issued |
+| Revoke a credential | `burn` | No, but a replacement can be issued with `mintTo` |
 
 A blocked organizer cannot create events, and no token can be minted under their existing events.
 Tokens already minted are unaffected.
@@ -326,16 +377,21 @@ several; all optional):
    holder receives the salt with the other openings.
 
 **Verifier.** Checks the person's document as usual and asks them for that document's salt. They
-compute the same value, publish an addressed request whose set holds only that value, and the
-holder answers with `proveCredentialAttribute` (flow 7). Ask the real question (e.g. a grade) in a
-second request addressed to the same pseudonym: a holder has one credential per event, so both
-proofs are about the same credential.
+compute the same value and publish one credential request (flow 7) with two conditions: the
+identity field, with a set that holds only that value, and the real question (e.g. a grade, with
+the set of accepted grades). Up to two more conditions fit. The holder answers with one
+`proveCredentialAttributes` proof, which covers every condition against the same credential.
+
+**Why one request.** With one request per condition, someone who borrowed a friend's key could
+have the friend answer the grade request alone and show only that proof, skipping the identity
+request. A credential request can only be answered whole: there is no transaction that answers
+the grade and skips the identity.
 
 **What it stops.** The friend's credential holds the friend's document, so the identity proof
 fails for the person being checked, even with the friend's salt. What it relies on: the issuer
 checked the document before issuing, and the verifier checks the person's.
 
-**Why the salt.** The request's `setRoot` is public. Without a salt, document numbers are few
+**Why the salt.** The condition's `setRoot` is public. Without a salt, document numbers are few
 enough to brute-force from it, linking the pseudonym to the document for anyone watching.
 
 ### 13. Request a credential update
@@ -348,8 +404,9 @@ are fixed in its credential leaf.
    envelope (e.g. its hash). Filing again replaces the commitment.
 2. **Issuer.** Find pending requests (indexer: `/api/credential-update-requests?issuerPk=…&status=pending`),
    check the envelope against `payloadCommit`, verify the new document, then either:
-   - re-issue: `burn(tokenId)`, which also removes the request, then `mintTo` the updated
-     credential for the same pseudonym (flow 10); or
+   - re-issue: `reissueCredential(tokenId, …)` with the updated credential (flow 10). One
+     transaction burns the old token, mints the new one to the same pseudonym and removes the
+     request; or
    - `dismissCredentialUpdate(tokenId)`.
 
 **Verified on-chain**
@@ -358,5 +415,6 @@ are fixed in its credential leaf.
   pseudonym is its owner; the commitment is not all zeros.
 - `dismissCredentialUpdate`: not paused; the token has a pending request; the caller is its issuer
   or the admin.
+- `reissueCredential`: see flow 10. It does not need a pending request.
 
 **Public:** that a token's holder asked for an update, and when. The content stays off-chain.

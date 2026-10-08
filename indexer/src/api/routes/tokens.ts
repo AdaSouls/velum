@@ -10,7 +10,8 @@ export function tokensRouter(db: Pool): Router {
       const { rows } = await db.query(
         `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
                 t.minted_block, t.minted_tx, t.burned_block, t.burned_tx,
-                t.token_metadata_uri, t.token_private_metadata_commit, e.metadata_uri
+                t.token_metadata_uri, t.token_private_metadata_commit, t.replaces_token_id,
+                e.metadata_uri
          FROM tokens t
          JOIN events e ON e.event_id = t.first_event_id
          WHERE t.owner_pk = $1
@@ -32,7 +33,8 @@ export function tokensRouter(db: Pool): Router {
       const { rows } = await db.query(
         `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
                 t.minted_block, t.minted_tx, t.burned_block, t.burned_tx,
-                t.token_metadata_uri, t.token_private_metadata_commit, e.metadata_uri
+                t.token_metadata_uri, t.token_private_metadata_commit, t.replaces_token_id,
+                e.metadata_uri
          FROM tokens t
          JOIN events e ON e.event_id = t.first_event_id
          WHERE t.token_id = $1`,
@@ -71,6 +73,8 @@ export function normaliseToken(row: Record<string, unknown>) {
     mintedTx:     row.minted_tx,
     burnedBlock:  row.burned_block ? Number(row.burned_block) : null,
     burnedTx:     row.burned_tx,
+    // The token this one replaced, when it was minted by reissueCredential.
+    replacesTokenId: row.replaces_token_id != null ? Number(row.replaces_token_id) : null,
     // This token's own metadata (inherited from the event at claim time, or
     // personalized per-recipient via mintTo) — prefer this over metadataURI
     // for rendering the actual badge.

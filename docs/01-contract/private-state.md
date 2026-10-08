@@ -82,7 +82,7 @@ secret key.
 | Who lost their key | Consequence | What can still be done |
 |---|---|---|
 | **Holder** | Cannot prove ownership or attendance and cannot burn their own tokens. The tokens stay on-chain, owned by pseudonyms no one controls. | Start over with a new key (new pseudonyms). Claim public events again, or ask the organizer to `mintTo` the new pseudonym. The issuer or admin can revoke the orphaned token. A re-claim counts toward `maxSupply`. |
-| **Holder** (attribute openings only) | Cannot produce `proveCredentialAttribute` proofs. Plain attendance proofs still work if they know the credential's attribute root. | Ask the organizer to deliver the openings again. This includes identity attributes: without the salt, the holder cannot answer a verifier's identity check. |
+| **Holder** (attribute openings only) | Cannot produce `proveCredentialAttributes` proofs. Plain attendance proofs still work if they know the credential's attribute root. | Ask the organizer to deliver the openings again. This includes identity attributes: without the salt, the holder cannot answer a verifier's identity check. |
 | **Organizer** | Cannot mint, deactivate or revoke for their events. | The admin can still `mintTo`, `deactivateEvent` and `burn` for any event. The organizer's identity cannot be moved to a new key. |
 | **Organizer** (openings only) | Hidden metadata can never be revealed, and event-level attributes can never be proven. | Nothing. The commitments stay on-chain unopened. |
 | **Admin** | No more `pause`, issuer moderation, event reactivation or admin revocations. `adminPk` is sealed and cannot be changed. | Keep the deployment wallet seed safe: the admin key is derived from it. |

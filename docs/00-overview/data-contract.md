@@ -57,6 +57,7 @@ Ledger: five maps keyed by token id → table `tokens` → `GET /api/tokens/:tok
 | `burnedTokens[id]` present | `is_burned` | `isBurned` |
 | — (mint transaction) | `minted_block`, `minted_tx` | `mintedBlock`, `mintedTx` |
 | — (burn transaction) | `burned_block`, `burned_tx` | `burnedBlock`, `burnedTx` |
+| — (derived: the token burned in the same `reissueCredential` transaction) | `replaces_token_id` | `replacesTokenId` (`null` unless minted by a re-issue) |
 | `events[tokenEvent[id]].metadataURI` | joined from `events.metadata_uri` | `metadataURI` |
 
 The name `first_event_id` / `firstEventId` is historical. A token belongs to exactly one event.
@@ -76,6 +77,23 @@ Ledger: `disclosureRequests: Map<Bytes<32>, DisclosureRequest>` → table `discl
 | `recipient` (all zeros = open request) | `recipient_pk` (`NULL` = open) | `recipientPk` (`null` = open) |
 | — (publishing transaction) | `published_block`, `published_tx` | `publishedBlock`, `publishedTx` |
 
+## Credential requests
+
+Ledger: `credentialRequests: Map<Bytes<32>, CredentialRequest>` → table `credential_requests` →
+`GET /api/credential-requests`, `GET /api/credential-requests/:requestId`
+
+| Ledger | Table column | API field |
+|---|---|---|
+| map key (request id) | `request_id` | `requestId` |
+| `verifier` | `verifier_pk` | `verifierPk` |
+| `eventId` | `event_id` | `eventId` |
+| `recipient` (never all zeros) | `recipient_pk` | `recipientPk` |
+| `conditions` (`Vector<4, CredentialCondition>`; all-zero slots are unused) | `conditions` (`JSONB`: the used conditions, in order, as `{slot, fieldId, setRoot}`) | `conditions` |
+| — (publishing transaction) | `published_block`, `published_tx` | `publishedBlock`, `publishedTx` |
+
+`slot` is the condition's position in the on-chain vector, which is where its answer goes in
+`proveCredentialAttributes`.
+
 ## Credential update requests
 
 Ledger: `credentialUpdateRequests: Map<Uint<64>, Bytes<32>>` → table `credential_update_requests`
@@ -85,9 +103,10 @@ Ledger: `credentialUpdateRequests: Map<Uint<64>, Bytes<32>>` → table `credenti
 |---|---|---|
 | map key (token id) | `token_id` | `tokenId` |
 | map value (commitment to the off-chain request) | `payload_commit` | `payloadCommit` |
-| entry present / removed | `status` | `status`: `pending` while on the ledger; `dismissed` or `burned` once removed |
+| entry present / removed | `status` | `status`: `pending` while on the ledger; `dismissed`, `burned` or `reissued` once removed |
 | — (latest `requestCredentialUpdate` transaction) | `requested_block`, `requested_tx` | `requestedBlock`, `requestedTx` |
 | — (transaction that removed it) | `closed_block`, `closed_tx` | `closedBlock`, `closedTx` |
+| — (derived: the token minted by the `reissueCredential` that removed it) | `reissued_token_id` | `reissuedTokenId` (`null` unless `status` is `reissued`) |
 | `tokenOwner[id]`, `tokenIssuer[id]`, `tokenEvent[id]` | joined from `tokens` | `ownerPk`, `issuerPk`, `eventId` |
 
 The ledger only holds pending requests. The table keeps closed ones too, so the database knows

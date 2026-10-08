@@ -13,32 +13,36 @@ Properties that hold after every transaction. "Enforced by" says what guarantees
 | An event id can only be created by the organizer whose key is hashed into it. | `createEvent` derives the id from the caller's own key. Nobody can take another organizer's id. |
 | A blocked issuer stays blocked. | There is no unblock circuit, and `registerIssuer` refuses a key that already has an entry. |
 | A disclosure request never changes once published. | `publishDisclosureRequest` refuses an existing id; no other circuit writes the map. |
-| An addressed request can only be answered by its recipient. | `proveTokenOwnership`, `proveEventAttendance` and `proveCredentialAttribute` compare `recipient`, read from `disclosureRequests`, with the holder pseudonym rebuilt from `local_sk()`. Tested in "an addressed request can only be answered by its recipient" and "another holder who genuinely qualifies cannot answer in the recipient's place". |
-| A credential's private attribute is only ever proven for an addressed request. | `proveCredentialAttribute` rejects a request whose `recipient` is all zeros. |
+| A credential request never changes once published. | `publishCredentialRequest` refuses an existing id; no other circuit writes `credentialRequests`. |
+| An addressed request can only be answered by its recipient. | `proveTokenOwnership` and `proveEventAttendance` compare `recipient`, read from `disclosureRequests`, with the holder pseudonym rebuilt from `local_sk()`; `proveCredentialAttributes` does the same with `credentialRequests`. Tested in "an addressed request can only be answered by its recipient" and "another holder who genuinely qualifies cannot answer in the recipient's place". |
+| A credential's private attribute is only ever proven for an addressed request. | `proveCredentialAttributes` only reads `credentialRequests`, and `publishCredentialRequest` rejects a `recipient` that is all zeros. Tested in "rejects an open request: private attributes are only asked of one holder". |
+| All conditions of a credential request are proven against one credential, or none are. | `proveCredentialAttributes` takes the whole request and checks every used condition in the same proof; there is no circuit that answers a subset. Each condition's attribute path must lead to the one attribute root that is hashed into the caller's credential leaf. Tested in "a borrowed key cannot answer the GPA and skip the identity: it is all or nothing" and "conditions cannot be assembled from two different attribute trees". |
 
 ### Tokens
 
 | Invariant | Enforced by |
 |---|---|
-| Token ids are sequential: a new token gets `tokenId = totalSupply`, then `totalSupply` increases by one. | `mintTokenTo` |
+| Token ids are sequential: a new token gets `tokenId = totalSupply`, then `totalSupply` increases by one. | `mintTokenTo`, `reissueCredential` |
 | `totalSupply` and `events[…].minted` never decrease. | No circuit decrements them. Burns do not free supply. |
 | For an event with `maxSupply != 0`, `minted <= maxSupply`. | `assert` in `mintTokenTo` |
 | A token's owner, event and issuer never change. | No circuit rewrites `tokenOwner`, `tokenEvent` or `tokenIssuer` for an existing id. There is no transfer. |
-| A holder pseudonym has at most one live token per event. | `eventHolderToken` index, checked in `mintTokenTo` |
+| A holder pseudonym has at most one live token per event. | `eventHolderToken` index, checked in `mintTokenTo`. `reissueCredential` burns the old token and moves the index entry to the new one in the same transaction. |
 | After a revocation, the holder cannot `claim` that event again; only the issuer or admin can issue a replacement. | The index entry is kept on revocation, and only `mintTo` passes `reissueRevoked`. |
 | After a self-burn, the holder can `claim` again. | `burn` removes the index entry when the caller is the owner. |
 | A burned token stays burned. | `burnedTokens` entries are only added. |
-| A pending update request belongs to a live token and was filed by its holder. | `requestCredentialUpdate` checks the token is not burned and that the caller's pseudonym is its owner; `burn` removes the request. Only the issuer or the admin can dismiss one. |
+| A pending update request belongs to a live token and was filed by its holder. | `requestCredentialUpdate` checks the token is not burned and that the caller's pseudonym is its owner; `burn` and `reissueCredential` remove the request. Only the issuer or the admin can dismiss one. |
+| A re-issue never leaves the holder without a credential. | `reissueCredential` burns the old token and mints the new one in one transaction, and every `assert` runs before any write: a failed re-issue changes nothing. Tested in "a re-issue that cannot mint leaves the old credential untouched". |
+| A re-issue does not change an event's `minted` count. | `reissueCredential` does not write `events` and does not check `maxSupply`; only `totalSupply` grows. Tested in "does not use up supply: minted stays the same, and a full event can still re-issue". |
 | An organizer cannot give themselves a token of their own event with their own key. | `claim` rejects the organizer's key; `mintTo` rejects the caller's own pseudonym. This binds one key only (see [Security](security.md#threat-model)), and the admin can still mint to an organizer. |
-| No token is minted for an inactive or expired event, or under a blocked issuer. | `assert`s in `mintTokenTo` |
+| No token is minted for an inactive or expired event, or under a blocked issuer. | `assert`s in `mintTokenTo` and in `reissueCredential` |
 
 ### Credential tree
 
 | Invariant | Enforced by |
 |---|---|
-| The leaf at index `tokenId` is the credential leaf of that token, or empty if the token was burned. | `insertIndex` at mint, `insertIndexDefault` at burn |
-| At most 2^20 (1,048,576) tokens can ever be minted. | `assert(tokenId < 1048576)`; the tree has depth 20 |
-| A burned credential cannot be proven against any root, old or new. | `burn` clears the leaf **and** calls `resetHistory()` |
+| The leaf at index `tokenId` is the credential leaf of that token, or empty if the token was burned. | `insertIndex` at mint, `insertIndexDefault` at burn; `reissueCredential` does both |
+| At most 2^20 (1,048,576) tokens can ever be minted. | `assert(tokenId < 1048576)` in `mintTokenTo` and `reissueCredential`; the tree has depth 20 |
+| A burned credential cannot be proven against any root, old or new. | `burn` and `reissueCredential` clear the leaf **and** call `resetHistory()` |
 
 ### Revealed metadata
 
@@ -61,7 +65,7 @@ While `isPaused` is true, every circuit that writes to the ledger fails, except 
 | A holder's public key (`derive_pk`) is not published by claiming or by proving. | `claim` compares it in-circuit and stores only the pseudonym. |
 | An anonymous proof (open request) does not reveal the token, the pseudonym or the credential leaf. | These proofs use `holder_secret_pk` (no `disclose`) and disclose only the request id and a tree root. Tested in "the public transcript reveals neither the holder pseudonym nor the credential leaf". |
 | An attribute proof does not reveal the attribute's value or its randomness. | `value` and `rand` are never wrapped in `disclose()` in the `prove…` circuits. |
-| A predicate proof is only meaningful against a verifier-chosen set. | The set root is read from `disclosureRequests`, never taken as an argument. |
+| A predicate proof is only meaningful against a verifier-chosen set. | The set root is read from `disclosureRequests` or `credentialRequests`, never taken as an argument. |
 | Nullifiers from the same key for different requests are unlinkable. | The request id is hashed into the nullifier. |
 | Private credential attributes are bound to one holder and one event. | The attribute root is hashed into the credential leaf together with the event id and the pseudonym. |
 | `isSoulbound` is not published. | It is passed to a witness only. |
@@ -90,7 +94,7 @@ one purpose can never collide with one computed for another.
 | Public key | `"adasouls:pk:v1:"`, `sk` | Admin / organizer / verifier identity |
 | Holder pseudonym | `"adasouls:holder-pk:v1:"`, `sk`, `issuerId` | Token ownership, per organizer |
 | Event id | `"adasouls:event:v1:"`, `organizerPk`, `label` | Squat-proof event ids |
-| Request id | `"adasouls:disclosure-req:v1:"`, `verifierPk`, `label` | Squat-proof request ids |
+| Request id | `"adasouls:disclosure-req:v1:"`, `verifierPk`, `label` | Squat-proof request ids, for disclosure requests and credential requests (each kind in its own map) |
 | Holder-event key | `"adasouls:holder-event:v1:"`, `H(holderPk, eventId)` | "Already claimed" index |
 | Credential leaf | `"adasouls:cred-leaf:v1:"`, `eventId`, `holderPk`, `credAttrRoot` | Leaf of `credentials` |
 | Credential attribute leaf | `"adasouls:cred-attr:v1:"`, `fieldId`, `commit(value, rand)` | Leaf of a credential's attribute tree |
@@ -128,7 +132,7 @@ id), so one opening cannot be replayed under another field or another event.
 |---|---|---|---|---|
 | Event attributes | 8 | 256 fields | Organizer, off-chain | `events[…].privateAttributesRoot` |
 | Credential attributes | 8 | 256 fields | Organizer, off-chain | Inside the credential leaf |
-| Verifier's accepted set | 16 | 65,536 values | Verifier, off-chain | `disclosureRequests[…].setRoot` |
+| Verifier's accepted set | 16 | 65,536 values | Verifier, off-chain | `disclosureRequests[…].setRoot`, or a condition's `setRoot` in `credentialRequests[…].conditions` |
 | Credentials | 20 | 1,048,576 tokens | The contract | `credentials` (on-chain, with root history) |
 
 Depths are fixed at compile time. Off-chain trees must use the same hashing as Compact's
@@ -151,10 +155,10 @@ root.
 | The same holder claims an event twice | `eventHolderToken[H(holderPk, eventId)]` must be empty. This is a public index, not a nullifier: minting is public anyway. |
 | The same key answers a single-use request twice | `proveAttributeMembershipOnce` inserts `H(sk, requestId)` into `usedDisclosures` and rejects a repeat. |
 | A prover invents their own request to mint fresh nullifiers | The request id must exist in `disclosureRequests`. |
-| A revoked credential keeps proving against an old root | `burn` resets the tree's root history. |
+| A revoked or replaced credential keeps proving against an old root | `burn` and `reissueCredential` reset the tree's root history. |
 | Someone takes an event or request id before its owner | Ids are derived from the caller's own key. |
 
-The stateless proofs (`proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttribute`,
+The stateless proofs (`proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttributes`,
 `proveAttributeMembership`) have no nullifier by design: answering twice is harmless, and they
 leave no ledger footprint.
 
