@@ -421,8 +421,9 @@ curl "https://velum-api.adasouls.io/api/credential-requests?recipientPk=<holder 
 ]
 ```
 
-The example shows the shape only. The contract with credential requests is not deployed on
-preprod yet.
+The example shows the shape only. The contract with credential requests is deployed on preprod,
+but the public API host does not follow it yet (see
+[`deployments/preprod.md`](../../deployments/preprod.md)).
 
 ---
 

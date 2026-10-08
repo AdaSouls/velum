@@ -61,8 +61,11 @@ it needs an upgrade, a new deployment, or nothing.
   circuit's keys change. New address, indexer database reset, and a frontend build with the new
   contract artifacts, zkir and keys (all 22 circuits).
 
-  **On-chain (preprod):** not deployed yet. Preprod still runs the previous contract, at
-  `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a`.
+  **On-chain (preprod):** deployed 2026-10-08 (05:26 UTC), address
+  `5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255`. Deployed empty (no demo
+  event). Not live yet: the API host and the frontend still follow the previous contract,
+  `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a`, until the frontend has a
+  build for this one. See [`deployments/preprod.md`](../../deployments/preprod.md).
 
 - **Identity documents and credential update requests.** Lets a verifier make sure a credential
   belongs to the person they checked, not to a friend who lent their key, and lets a holder ask
