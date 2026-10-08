@@ -74,7 +74,7 @@ To check such a proof, a verifier looks at the chain, not at the Velum API:
 The web app's receipt checker does this. A successful transaction is the proof: every failure
 path in these circuits is an `assert`, so a failed proof never lands on-chain.
 
-The same applies to `proveTokenOwnership`, `proveCredentialAttribute` and
+The same applies to `proveTokenOwnership`, `proveCredentialAttributes` and
 `proveAttributeMembership`. Only `proveAttributeMembershipOnce` leaves a trace in the database
 (one row in `disclosure_nullifiers`).
 
@@ -85,10 +85,12 @@ The same applies to `proveTokenOwnership`, `proveCredentialAttribute` and
 | `createEvent` | new `events` entry | new `events` row (and an `issuers` row if missing) | `/api/events` |
 | `claim`, `mintTo` | new token entries, `minted` + 1 | new `tokens` row, `events.minted` | `/api/tokens/…`, `/api/events/…` |
 | `burn` | new `burnedTokens` entry; the token's pending update request, if any, is removed | `tokens.is_burned`; `credential_update_requests.status = 'burned'` | `isBurned` on the token; `status` on the update request |
+| `reissueCredential` | new `burnedTokens` entry and new token entries; `minted` unchanged; the old token's pending update request, if any, is removed | `tokens.is_burned` on the old row; new `tokens` row with `replaces_token_id`; `credential_update_requests.status = 'reissued'`, `reissued_token_id` | `isBurned` on the old token; `replacesTokenId` on the new one; `status` and `reissuedTokenId` on the update request |
 | `requestCredentialUpdate` | new or replaced `credentialUpdateRequests` entry | `credential_update_requests` row, `status = 'pending'` | `/api/credential-update-requests` |
 | `dismissCredentialUpdate` | `credentialUpdateRequests` entry removed | `credential_update_requests.status = 'dismissed'` | `status` on the update request |
 | `deactivateEvent` | `isActive = false` | `events.is_active`, `deactivated_block` | `isActive` on the event |
 | `publishDisclosureRequest` | new `disclosureRequests` entry | new `disclosure_requests` row | `/api/disclosure-requests` |
+| `publishCredentialRequest` | new `credentialRequests` entry | new `credential_requests` row | `/api/credential-requests` |
 | `registerIssuer`, `deactivateIssuer` | `issuers` entry | `issuers` row | not exposed |
 | `proveAttributeMembershipOnce` | new nullifier | new `disclosure_nullifiers` row | not exposed |
 | Other proofs | none | none | none |

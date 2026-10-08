@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Pool } from 'pg';
 
-const STATUSES = ['pending', 'dismissed', 'burned'];
+const STATUSES = ['pending', 'dismissed', 'burned', 'reissued'];
 
 // Credential update requests (requestCredentialUpdate in poap.compact): an
 // issuer's tooling lists the pending ones for its tokens, a holder's wallet
@@ -54,7 +54,7 @@ export function updateRequestsRouter(db: Pool): Router {
 
 const SELECT = `
   SELECT r.token_id, r.payload_commit, r.status, r.requested_block, r.requested_tx,
-         r.closed_block, r.closed_tx, t.owner_pk, t.issuer_pk, t.first_event_id
+         r.closed_block, r.closed_tx, r.reissued_token_id, t.owner_pk, t.issuer_pk, t.first_event_id
   FROM credential_update_requests r
   JOIN tokens t ON t.token_id = r.token_id`;
 
@@ -68,8 +68,10 @@ function normaliseUpdateRequest(row: Record<string, unknown>) {
     status:         row.status,
     requestedBlock: row.requested_block ? Number(row.requested_block) : null,
     requestedTx:    row.requested_tx,
-    // Set once the request leaves the ledger (dismissed or burned).
+    // Set once the request leaves the ledger (dismissed, burned or reissued).
     closedBlock:    row.closed_block ? Number(row.closed_block) : null,
     closedTx:       row.closed_tx ?? null,
+    // For 'reissued': the token that replaced this one (reissueCredential).
+    reissuedTokenId: row.reissued_token_id != null ? Number(row.reissued_token_id) : null,
   };
 }

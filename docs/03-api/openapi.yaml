@@ -21,6 +21,7 @@ tags:
   - name: events
   - name: tokens
   - name: disclosure-requests
+  - name: credential-requests
   - name: credential-update-requests
 paths:
   /health:
@@ -238,6 +239,65 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/credential-requests:
+    get:
+      tags: [credential-requests]
+      summary: List credential requests
+      description: >-
+        Every published credential request (publishCredentialRequest), by publication block
+        ascending. Not paginated. Credential requests are not listed under
+        /api/disclosure-requests.
+      parameters:
+        - name: verifierPk
+          in: query
+          required: false
+          description: Return only requests published by this public key.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+        - name: recipientPk
+          in: query
+          required: false
+          description: Return only requests addressed to this holder pseudonym.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+        - name: eventId
+          in: query
+          required: false
+          description: Return only requests about this event.
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CredentialRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/credential-requests/{requestId}:
+    get:
+      tags: [credential-requests]
+      summary: Get one credential request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hex32"
+      responses:
+        "200":
+          description: The request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/credential-update-requests:
     get:
       tags: [credential-update-requests]
@@ -414,6 +474,7 @@ components:
         - mintedTx
         - burnedBlock
         - burnedTx
+        - replacesTokenId
         - tokenMetadataURI
         - tokenPrivateMetadataCommit
         - metadataURI
@@ -444,6 +505,11 @@ components:
         burnedTx:
           type: string
           nullable: true
+        replacesTokenId:
+          type: integer
+          nullable: true
+          description: >-
+            The token this one replaced, when it was minted by reissueCredential. null otherwise.
         tokenMetadataURI:
           type: string
           nullable: true
@@ -495,12 +561,73 @@ components:
         publishedTx:
           type: string
           nullable: true
+    CredentialCondition:
+      type: object
+      required:
+        - slot
+        - fieldId
+        - setRoot
+      properties:
+        slot:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: >-
+            Position of the condition in the on-chain vector of four, which is where its answer
+            goes in proveCredentialAttributes.
+        fieldId:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: The credential attribute asked about.
+        setRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: Merkle root of the accepted values for that attribute.
+    CredentialRequest:
+      type: object
+      description: >-
+        A verifier's question of up to four conditions about one holder's credential. The holder
+        answers all of them in one proof (proveCredentialAttributes), or none.
+      required:
+        - requestId
+        - verifierPk
+        - eventId
+        - recipientPk
+        - conditions
+        - publishedBlock
+        - publishedTx
+      properties:
+        requestId:
+          $ref: "#/components/schemas/Hex32"
+        verifierPk:
+          $ref: "#/components/schemas/Hex32"
+        eventId:
+          $ref: "#/components/schemas/Hex32"
+        recipientPk:
+          allOf:
+            - $ref: "#/components/schemas/Hex32"
+          description: >-
+            Holder pseudonym (a token's ownerPk) that must answer. Never null: a credential
+            request is always addressed.
+        conditions:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: The used conditions, in the request's order. Unused slots are left out.
+          items:
+            $ref: "#/components/schemas/CredentialCondition"
+        publishedBlock:
+          type: integer
+          nullable: true
+        publishedTx:
+          type: string
+          nullable: true
     UpdateRequestStatus:
       type: string
-      enum: [pending, dismissed, burned]
+      enum: [pending, dismissed, burned, reissued]
       description: >-
-        pending while on the ledger; dismissed after dismissCredentialUpdate; burned after burn
-        (a re-issue, a revocation or a self-burn).
+        pending while on the ledger; dismissed after dismissCredentialUpdate; reissued after
+        reissueCredential; burned after burn (a revocation or a self-burn).
     CredentialUpdateRequest:
       type: object
       required:
@@ -514,6 +641,7 @@ components:
         - requestedTx
         - closedBlock
         - closedTx
+        - reissuedTokenId
       properties:
         tokenId:
           type: integer
@@ -546,3 +674,7 @@ components:
         closedTx:
           type: string
           nullable: true
+        reissuedTokenId:
+          type: integer
+          nullable: true
+          description: For status reissued, the token that replaced this one. null otherwise.

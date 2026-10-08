@@ -13,7 +13,8 @@ soulbound credentials that holders can prove things about **without revealing th
     (**anonymous** proof), or
   - that a private attribute of their credential belongs to a set a verifier asked about
     ("my tier is in {gold, platinum}") — without revealing the value. The verifier addresses
-    this question to one holder, and only that holder can answer it.
+    this question to one holder, and only that holder can answer it. A question can combine up
+    to four such conditions, answered together or not at all.
 - Issuers can revoke. Credentials are non-transferable by construction.
 
 This repository contains the Compact smart contract, the indexer that serves its state over a
@@ -49,20 +50,22 @@ tree root, never which leaf.
 
 ### Proofs
 
-Every proof answers a **disclosure request** a verifier published on-chain first
-(`publishDisclosureRequest`). Pinning the question on-chain is what makes the answer meaningful:
+Every proof answers a request a verifier published on-chain first: a **disclosure request**
+(`publishDisclosureRequest`) or, for a credential's private attributes, a **credential request**
+(`publishCredentialRequest`). Pinning the question on-chain is what makes the answer meaningful:
 the prover can't pick their own "set" to prove against, and the verifier can tell a fresh proof
 for *their* request apart from any other.
 
-A request is **open** (any holder of the event can answer) or **addressed** to one holder's
-pseudonym (only that holder can answer, so the request can't be handed to someone else who
-qualifies). Questions about a credential's private attribute are always addressed.
+A disclosure request is **open** (any holder of the event can answer) or **addressed** to one
+holder's pseudonym (only that holder can answer, so the request can't be handed to someone else
+who qualifies). A credential request is always addressed. It holds up to four conditions, and
+they can only be answered together, in one proof about one credential.
 
 | Circuit | Proves | Reveals |
 |---|---|---|
 | `proveTokenOwnership` | "I own token #N of your event" | the token id (and so the holder's pseudonym for that issuer) |
 | `proveEventAttendance` | "I own *some* live credential of your event" | only the request, the event and a tree root |
-| `proveCredentialAttribute` | "I am the holder you asked, and my credential's private attribute `X` is in your set" | the request (which names the holder), the event and a tree root — not the value |
+| `proveCredentialAttributes` | "I am the holder you asked, and my credential's private attributes meet every condition of your request" (up to four, e.g. identity and grade; all or nothing) | the request (which names the holder), the event and a tree root — not the values |
 | `proveAttributeMembership` | an **event-level** private attribute is in your set | the request |
 | `proveAttributeMembershipOnce` | same, at most once per holder (nullifier) | the request and a nullifier |
 
@@ -74,7 +77,7 @@ qualifies). Questions about a credential's private attribute are always addresse
 | Which pseudonym holds which token, of which event | Which pseudonyms belong to the same person across issuers |
 | Burns / revocations | Private attribute values (unless the organizer chooses to reveal them) |
 | Commitments (metadata, attribute roots, credential leaves) | **Which** holder produced an anonymous proof |
-| Disclosure requests (and who they are addressed to) and single-use nullifiers | |
+| Disclosure and credential requests (and who they are addressed to) and single-use nullifiers | |
 
 Limits worth knowing:
 
@@ -85,7 +88,7 @@ Limits worth knowing:
   other holder of the event; address the request when it matters who answers. To make sure the
   credential belongs to the person in front of you (not to a friend who lent their key), the
   issuer can tie it to one or more identity documents (`computeIdentityValue`) and the verifier
-  checks the one they saw — see [flow 12](docs/01-contract/circuits.md#12-tie-a-credential-to-identity-documents).
+  asks for the one they saw and their real question in a single credential request — see [flow 12](docs/01-contract/circuits.md#12-tie-a-credential-to-identity-documents).
 - **Addressed requests aren't anonymous.** The request names the holder's pseudonym on-chain.
 - **Set size matters.** Asking "is your value in {X}" with a one-element set is full disclosure.
 
@@ -101,7 +104,8 @@ can't be proven against any old root either.
 
 A credential's attributes are fixed when it's minted. When one changes (e.g. an identity document
 renewed with a new number), the holder files `requestCredentialUpdate` and the issuer re-issues
-(`burn` + `mintTo`) or `dismissCredentialUpdate`s it — see
+(`reissueCredential`: old token burned and new one minted to the same holder in one transaction)
+or `dismissCredentialUpdate`s it — see
 [flow 13](docs/01-contract/circuits.md#13-request-a-credential-update).
 
 There is **no transfer circuit**: no circuit ever changes the owner of an existing token, so
@@ -155,6 +159,7 @@ found while writing it.
 | [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, and serves the REST API (`/api/events`, `/api/tokens`, `/api/disclosure-requests`, `/api/credential-update-requests`) from the same process |
 | [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet or preprod) |
 | [`scripts/upgrade.ts`](scripts/upgrade.ts) | Upgrades the deployed contract's circuits in place (same address) |
+| [`scripts/e2e-credential-flow.ts`](scripts/e2e-credential-flow.ts) | End-to-end smoke test on the local devnet: a multi-condition request and a re-issue, with real proofs |
 | [`deploy/production/`](deploy/production/) | Docker Compose stack + runbook for the API host |
 | [`devnet.yml`](devnet.yml) | Local Midnight devnet (node, indexer, proof server) + the indexer's Postgres |
 

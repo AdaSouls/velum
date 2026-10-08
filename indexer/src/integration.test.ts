@@ -30,10 +30,11 @@ import * as nodePath from 'node:path';
 
 import { applyStateDiff } from './poap-state.js';
 import { startSubscription } from './subscriptions.js';
-import type { LedgerView, EventRecord, IssuerRecord, DisclosureRequest } from './parser.js';
+import type { LedgerView, EventRecord, IssuerRecord, DisclosureRequest, CredentialRequest } from './parser.js';
 import { eventsRouter } from './api/routes/events.js';
 import { tokensRouter } from './api/routes/tokens.js';
 import { disclosuresRouter } from './api/routes/disclosures.js';
+import { credentialRequestsRouter } from './api/routes/credential-requests.js';
 import { updateRequestsRouter } from './api/routes/update-requests.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ function emptyLedger(): LedgerView {
     burnedTokens:    [],
     usedDisclosures: [],
     disclosureRequests: [],
+    credentialRequests: [],
     credentialUpdateRequests: [],
     isPaused:        false,
     adminPk:         new Uint8Array(32),
@@ -161,7 +163,35 @@ function withBurn(base: LedgerView, tokenId: bigint): LedgerView {
   };
 }
 
-// requestCredentialUpdate files or replaces; dismissCredentialUpdate and burn remove.
+// publishCredentialRequest: up to four conditions, the rest of the Vector<4> all-zero.
+function withCredentialRequest(
+  base: LedgerView,
+  requestId: Uint8Array,
+  verifier: Uint8Array,
+  eventId: Uint8Array,
+  recipient: Uint8Array,
+  conditions: Array<{ fieldId: Uint8Array; setRoot: Uint8Array }>,
+): LedgerView {
+  const padded = [...conditions];
+  while (padded.length < 4) padded.push({ fieldId: new Uint8Array(32), setRoot: new Uint8Array(32) });
+  const req: CredentialRequest = { verifier, eventId, recipient, conditions: padded };
+  return {
+    ...base,
+    credentialRequests: [...(base.credentialRequests as Array<[Uint8Array, CredentialRequest]>), [requestId, req]],
+  };
+}
+
+// reissueCredential: burns oldTokenId and mints newTokenId to the same owner, event and issuer in
+// one transaction, clearing a pending update request. The event's minted counter does not move.
+function withReissue(base: LedgerView, oldTokenId: bigint, newTokenId: bigint, tokenMetadataURI = 'ipfs://reissued'): LedgerView {
+  const find = <V>(entries: Iterable<[bigint, V]>) => [...entries].find(([id]) => id === oldTokenId)![1];
+  const minted = withToken(
+    base, newTokenId, find(base.tokenOwner), find(base.tokenIssuer), find(base.tokenEvent), tokenMetadataURI,
+  );
+  return withUpdateRequest(withBurn({ ...minted, events: base.events }, oldTokenId), oldTokenId, null);
+}
+
+// requestCredentialUpdate files or replaces; dismissCredentialUpdate, burn and reissueCredential remove.
 function withUpdateRequest(base: LedgerView, tokenId: bigint, payloadCommit: Uint8Array | null): LedgerView {
   const others = (base.credentialUpdateRequests as Array<[bigint, Uint8Array]>).filter(([id]) => id !== tokenId);
   return {
@@ -217,6 +247,7 @@ beforeAll(async () => {
   app.use('/api/events', eventsRouter(pool));
   app.use('/api/tokens', tokensRouter(pool));
   app.use('/api/disclosure-requests', disclosuresRouter(pool));
+  app.use('/api/credential-requests', credentialRequestsRouter(pool));
   app.use('/api/credential-update-requests', updateRequestsRouter(pool));
 
   server = createServer(app);
@@ -642,7 +673,7 @@ describe('POAP indexer — component integration', () => {
     one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
     expect(one).toMatchObject({ status: 'pending', requestedBlock: 6, closedBlock: null, closedTx: null });
 
-    // Re-issue: the issuer burns token 0, which clears its request in the same transaction.
+    // A revocation: the issuer burns token 0, which clears its request in the same transaction.
     const s8 = withUpdateRequest(withBurn(s7, 0n), 0n, null);
     await applyStateDiff(pool, 'burn', s7, s8, { txHash: '0xee08', blockHeight: 8n });
     one = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
@@ -655,6 +686,85 @@ describe('POAP indexer — component integration', () => {
 
     expect((await fetch(`${apiBase}/api/credential-update-requests?status=nope`)).status).toBe(400);
     expect((await fetch(`${apiBase}/api/credential-update-requests/9`)).status).toBe(404);
+  });
+
+  it('publishCredentialRequest → the request lists its used conditions, and the filters work', async () => {
+    if (!pool) return;
+
+    const REQ_1 = bytes(0x81);
+    const REQ_2 = bytes(0x82);
+    const FIELD_ID = bytes(0x49);
+    const FIELD_GPA = bytes(0x47);
+    const s0 = emptyLedger();
+    const s1 = withEvent(withEvent(s0, EVENT_A, ADMIN_PK, 100n), EVENT_B, ADMIN_PK, 100n);
+    await applyStateDiff(pool, 'createEvent', s0, s1, { txHash: '0xcc01', blockHeight: 1n });
+    const s2 = withCredentialRequest(s1, REQ_1, USER2_PK, EVENT_A, USER1_PK, [
+      { fieldId: FIELD_ID, setRoot: bytes(0x11) },
+      { fieldId: FIELD_GPA, setRoot: bytes(0x12) },
+    ]);
+    await applyStateDiff(pool, 'publishCredentialRequest', s1, s2, { txHash: '0xcc02', blockHeight: 2n });
+    const s3 = withCredentialRequest(s2, REQ_2, ADMIN_PK, EVENT_B, USER2_PK, [{ fieldId: FIELD_GPA, setRoot: bytes(0x13) }]);
+    await applyStateDiff(pool, 'publishCredentialRequest', s2, s3, { txHash: '0xcc03', blockHeight: 3n });
+
+    const one = await (await fetch(`${apiBase}/api/credential-requests/${hex(REQ_1)}`)).json() as any;
+    expect(one).toEqual({
+      requestId: hex(REQ_1), verifierPk: hex(USER2_PK), eventId: hex(EVENT_A), recipientPk: hex(USER1_PK),
+      conditions: [
+        { slot: 0, fieldId: hex(FIELD_ID), setRoot: hex(bytes(0x11)) },
+        { slot: 1, fieldId: hex(FIELD_GPA), setRoot: hex(bytes(0x12)) },
+      ],
+      publishedBlock: 2, publishedTx: '0xcc02',
+    });
+
+    const ids = async (query: string) =>
+      (await (await fetch(`${apiBase}/api/credential-requests${query}`)).json() as any[]).map((r) => r.requestId);
+    expect(await ids('')).toEqual([hex(REQ_1), hex(REQ_2)]);
+    expect(await ids(`?recipientPk=${hex(USER1_PK)}`)).toEqual([hex(REQ_1)]);
+    expect(await ids(`?verifierPk=${hex(ADMIN_PK)}`)).toEqual([hex(REQ_2)]);
+    expect(await ids(`?eventId=${hex(EVENT_B)}`)).toEqual([hex(REQ_2)]);
+    expect((await fetch(`${apiBase}/api/credential-requests/${hex(bytes(0x99))}`)).status).toBe(404);
+    // Credential requests are their own kind: they don't show up as disclosure requests.
+    expect(await (await fetch(`${apiBase}/api/disclosure-requests`)).json()).toEqual([]);
+  });
+
+  it('reissueCredential → old token burned, new token linked to it, request closed as reissued, minted unchanged', async () => {
+    if (!pool) return;
+
+    const s0 = emptyLedger();
+    const s1 = withEvent(s0, EVENT_A, ADMIN_PK, 2n);
+    await applyStateDiff(pool, 'createEvent', s0, s1, { txHash: '0xab01', blockHeight: 1n });
+    const s2 = withToken(withToken(s1, 0n, USER1_PK, ADMIN_PK, EVENT_A), 1n, USER2_PK, ADMIN_PK, EVENT_A);
+    await applyStateDiff(pool, 'mintTo', s1, s2, { txHash: '0xab02', blockHeight: 2n });
+    const s3 = withUpdateRequest(s2, 0n, bytes(0xc1));
+    await applyStateDiff(pool, 'requestCredentialUpdate', s2, s3, { txHash: '0xab03', blockHeight: 3n });
+
+    const s4 = withReissue(s3, 0n, 2n);
+    await applyStateDiff(pool, 'reissueCredential', s3, s4, { txHash: '0xab04', blockHeight: 4n });
+
+    const oldToken = await (await fetch(`${apiBase}/api/tokens/0`)).json() as any;
+    expect(oldToken).toMatchObject({ isBurned: true, burnedBlock: 4, burnedTx: '0xab04', replacesTokenId: null });
+    const newToken = await (await fetch(`${apiBase}/api/tokens/2`)).json() as any;
+    expect(newToken).toMatchObject({
+      ownerPk: hex(USER1_PK), firstEventId: hex(EVENT_A), isBurned: false, mintedBlock: 4,
+      replacesTokenId: 0, tokenMetadataURI: 'ipfs://reissued',
+    });
+    const untouched = await (await fetch(`${apiBase}/api/tokens/1`)).json() as any;
+    expect(untouched).toMatchObject({ isBurned: false, replacesTokenId: null });
+
+    const request = await (await fetch(`${apiBase}/api/credential-update-requests/0`)).json() as any;
+    expect(request).toMatchObject({ status: 'reissued', closedBlock: 4, closedTx: '0xab04', reissuedTokenId: 2 });
+    const reissued = await (await fetch(`${apiBase}/api/credential-update-requests?status=reissued`)).json() as any[];
+    expect(reissued.map((r) => r.tokenId)).toEqual([0]);
+
+    // A replacement does not use up supply.
+    const event = await (await fetch(`${apiBase}/api/events/${hex(EVENT_A)}`)).json() as any;
+    expect(event.minted).toBe(2);
+
+    // A re-issue with no pending request, of the replacement itself.
+    const s5 = withReissue(s4, 2n, 3n);
+    await applyStateDiff(pool, 'reissueCredential', s4, s5, { txHash: '0xab05', blockHeight: 5n });
+    const third = await (await fetch(`${apiBase}/api/tokens/3`)).json() as any;
+    expect(third).toMatchObject({ ownerPk: hex(USER1_PK), replacesTokenId: 2 });
   });
 
   it('reactivateEvent → event is active again and its deactivation is cleared', async () => {

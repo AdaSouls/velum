@@ -75,6 +75,50 @@ export function buildMerklePath(
   return { leaf: leafBytes32, path, rootBytes: upgradeFromTransient(acc) };
 }
 
+// Paths of every leaf of a small off-ledger tree (leaves at indices 0..n-1,
+// the rest of the tree empty), all leading to the same root — for attribute
+// trees with more than one attribute.
+export function buildTreePaths(leaves: Uint8Array[], depth: number) {
+  let width = 1;
+  let levels = 0;
+  while (width < leaves.length) { width *= 2; levels++; }
+  const rows: bigint[][] = [leaves.map(leafDigestField)];
+  while (rows[0].length < width) rows[0].push(0n);
+  for (let l = 0; l < levels; l++) {
+    const row = rows[l];
+    rows.push(Array.from({ length: row.length / 2 }, (_, i) => transientHash(FIELD_PAIR, [row[2 * i], row[2 * i + 1]])));
+  }
+  return leaves.map((leaf, index) => {
+    const siblings = new Array(depth).fill(0n);
+    const goesLeft = new Array(depth).fill(true);
+    for (let l = 0; l < levels; l++) {
+      const pos = index >> l;
+      siblings[l] = rows[l][pos ^ 1];
+      goesLeft[l] = pos % 2 === 0;
+    }
+    return buildMerklePath(leaf, depth, siblings, goesLeft);
+  });
+}
+
+// One condition of a credential request, and the holder's answer to it —
+// see CredentialCondition / proveCredentialAttributes in poap.compact.
+export type CredentialConditionArg = { fieldId: Uint8Array; setRoot: Uint8Array };
+export type CredentialAnswerArg = {
+  value: Uint8Array;
+  rand: Uint8Array;
+  attributePath: MerklePathArg;
+  setMembershipPath: MerklePathArg;
+};
+
+const MAX_CONDITIONS = 4;
+
+function emptyPath(depth: number): MerklePathArg {
+  return {
+    leaf: new Uint8Array(32),
+    path: Array.from({ length: depth }, () => ({ sibling: { field: 0n }, goes_left: true })),
+  };
+}
+
 // The POAP contract is account-model (no shielded coins), so the Zswap coin
 // public key is never used by circuit logic — a fixed dummy key is sufficient.
 const DUMMY_COIN_PUBLIC_KEY = '00'.repeat(32);
@@ -126,6 +170,14 @@ export class PoapSimulator {
       ...this.circuitContext,
       currentPrivateState: userPrivateState,
     };
+    return this;
+  }
+
+  // Moves the simulated chain's clock (seconds since epoch) — for checks
+  // that depend on block time, e.g. an event expiring after a mint.
+  setBlockTime(secondsSinceEpoch: bigint): this {
+    const queryContext = this.circuitContext.currentQueryContext;
+    queryContext.block = { ...queryContext.block, secondsSinceEpoch };
     return this;
   }
 
@@ -243,6 +295,21 @@ export class PoapSimulator {
   burn(tokenId: bigint): Ledger {
     this.circuitContext = this.contract.impureCircuits
       .burn(this.circuitContext, tokenId)
+      .context;
+    this.savePrivateState();
+    return this.getLedger();
+  }
+
+  reissueCredential(
+    tokenId: bigint,
+    newMetadataURI: string = 'ipfs://test-metadata',
+    newPrivateMetadataCommit: Uint8Array = new Uint8Array(32),
+    newCredentialAttributesRoot: Uint8Array = new Uint8Array(32),
+  ): Ledger {
+    this.circuitContext = this.contract.impureCircuits
+      .reissueCredential(
+        this.circuitContext, tokenId, newMetadataURI, newPrivateMetadataCommit, newCredentialAttributesRoot,
+      )
       .context;
     this.savePrivateState();
     return this.getLedger();
@@ -439,16 +506,44 @@ export class PoapSimulator {
     this.savePrivateState();
   }
 
-  proveCredentialAttribute(
-    requestId: Uint8Array,
-    value: Uint8Array,
-    rand: Uint8Array,
-    attributePath: MerklePathArg,
-    setMembershipPath: MerklePathArg,
-    credPath: MerklePathArg,
-  ): void {
-    const result = this.contract.impureCircuits.proveCredentialAttribute(
-      this.circuitContext, requestId, value, rand, attributePath, setMembershipPath, credPath,
+  // Verifier publishes up to four conditions for one holder as a single
+  // request; unused slots are padded with all-zero conditions.
+  publishCredentialRequest(
+    label: Uint8Array,
+    eventId: Uint8Array,
+    recipient: Uint8Array,
+    conditions: CredentialConditionArg[],
+  ): Uint8Array {
+    const padded = [...conditions];
+    while (padded.length < MAX_CONDITIONS) padded.push({ fieldId: new Uint8Array(32), setRoot: new Uint8Array(32) });
+    const result = this.contract.impureCircuits.publishCredentialRequest(
+      this.circuitContext, label, eventId, recipient, padded,
+    );
+    this.circuitContext = result.context;
+    this.savePrivateState();
+    return result.result as Uint8Array;
+  }
+
+  // Answers a credential request, one answer per condition in the request's
+  // order; unused slots are padded with dummy openings and paths.
+  proveCredentialAttributes(requestId: Uint8Array, answers: CredentialAnswerArg[], credPath: MerklePathArg): void {
+    const padded = [...answers];
+    while (padded.length < MAX_CONDITIONS) {
+      padded.push({
+        value: new Uint8Array(32),
+        rand: new Uint8Array(32),
+        attributePath: emptyPath(8),
+        setMembershipPath: emptyPath(16),
+      });
+    }
+    const result = this.contract.impureCircuits.proveCredentialAttributes(
+      this.circuitContext,
+      requestId,
+      padded.map((a) => a.value),
+      padded.map((a) => a.rand),
+      padded.map((a) => a.attributePath),
+      padded.map((a) => a.setMembershipPath),
+      credPath,
     );
     this.circuitContext = result.context;
     this.savePrivateState();

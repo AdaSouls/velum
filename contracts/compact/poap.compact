@@ -85,6 +85,33 @@ export struct DisclosureRequest {
   recipient: Bytes<32>,
 }
 
+// One condition of a CredentialRequest: "is the holder's private <fieldId>
+// attribute a member of the set rooted at <setRoot>?" An all-zero fieldId
+// marks an unused slot.
+export struct CredentialCondition {
+  fieldId: Bytes<32>,
+  setRoot: Bytes<32>,
+}
+
+// A verifier-published question about ONE holder's credential, made of up
+// to four conditions that can only be answered TOGETHER, in a single proof
+// (see publishCredentialRequest / proveCredentialAttributes). That is what
+// lets a verifier ask "is this the person on the document in front of me
+// (computeIdentityValue) AND is their grade at least 8?" as one question:
+// there is no transaction that answers the grade and skips the identity.
+// With one request per condition, a holder who borrowed someone else's
+// key could have that person answer the grade alone.
+//
+// Always addressed: recipient is the holder pseudonym that must answer
+// (same reasoning as DisclosureRequest.recipient, and a holder's private
+// data is never asked with an open request).
+export struct CredentialRequest {
+  verifier: Bytes<32>,
+  eventId: Bytes<32>,
+  recipient: Bytes<32>,
+  conditions: Vector<4, CredentialCondition>,
+}
+
 // ── Public Ledger ─────────────────────────────────────────────────────────────
 // Everything in this section is PUBLIC, visible on-chain to anyone. Nothing
 // secret may ever be stored here in the clear — only identifiers, hashes and
@@ -181,10 +208,20 @@ export ledger usedDisclosures: Set<Bytes<32>>;
 //         publishDisclosureRequest.
 export ledger disclosureRequests: Map<Bytes<32>, DisclosureRequest>;
 
+// requestId → the pinned multi-condition question a verifier published for
+// one holder. Same role as disclosureRequests, for the requests answered by
+// proveCredentialAttributes. Request ids are derived the same way
+// (disclosure_request_key) but live in their own map, so a verifier's label
+// names at most one request of each kind.
+// @ledger Immutable once published; the verifier's key, the recipient
+//         pseudonym and every condition (field ids, set roots) are public.
+//         Written by: publishCredentialRequest.
+export ledger credentialRequests: Map<Bytes<32>, CredentialRequest>;
+
 // Credential commitment tree — the anonymous counterpart to tokenOwner.
 // The leaf at index tokenId is credential_leaf(eventId, holderPk,
 // credAttrRoot), written at mint time. proveEventAttendance /
-// proveCredentialAttribute prove knowledge of a live leaf via a Merkle
+// proveCredentialAttributes prove knowledge of a live leaf via a Merkle
 // path, so the proof reveals only the tree root — not which token, which
 // holder pseudonym, or which attributes. A plain tokenId-keyed check
 // (like proveTokenOwnership) can't do that: every Map read puts its key in
@@ -209,11 +246,12 @@ export ledger credentials: HistoricMerkleTree<20, Bytes<32>>;
 // number) travels off-chain, encrypted to the issuer; this entry is what
 // lets the issuer trust that envelope came from the token's holder — the
 // envelope must hash to the stored commitment, and only the holder can
-// write it here. Removed when the issuer dismisses it or when the token is
-// burned (the re-issue path: burn, then mintTo the updated credential).
+// write it here. Removed when the issuer re-issues the credential
+// (reissueCredential), dismisses the request, or when the token is burned.
 // @ledger Public: that a token's holder asked for an update, and when.
 //         Never the document data. Written by: requestCredentialUpdate
-//         (insert), dismissCredentialUpdate and burn (remove).
+//         (insert), dismissCredentialUpdate, reissueCredential and burn
+//         (remove).
 export ledger credentialUpdateRequests: Map<Uint<64>, Bytes<32>>;
 
 // Contract-level pause flag
@@ -381,7 +419,7 @@ export circuit computeEventId(organizer: Bytes<32>, label: Bytes<32>): Bytes<32>
 
 // ── Pause / Unpause ───────────────────────────────────────────────────────────
 // While paused, every state-changing circuit fails. The read-only proofs
-// (proveTokenOwnership, proveEventAttendance, proveCredentialAttribute,
+// (proveTokenOwnership, proveEventAttendance, proveCredentialAttributes,
 // proveAttributeMembership) keep working.
 
 // @circuit   Emergency stop.
@@ -717,7 +755,7 @@ export circuit claim(eventId: Bytes<32>, isSoulbound: Boolean): [] {
 // credentialAttributesRoot is the root of THIS recipient's private
 // attribute tree (leaves from computeCredentialAttrLeaf) — data unique to
 // this credential that the holder can later prove predicates about,
-// anonymously, via proveCredentialAttribute. The organizer must hand the
+// anonymously, via proveCredentialAttributes. The organizer must hand the
 // recipient the openings (fieldId, value, rand per leaf) off-chain. Pass
 // an all-zero Bytes<32> for a credential with no private attributes.
 // Only the resulting credential leaf is written on-chain; the root itself
@@ -784,7 +822,7 @@ export circuit mintTo(
 //
 // Every burn (self or revocation) also kills the token's credential leaf
 // and resets the tree's root history, so the credential can't be used in
-// proveEventAttendance / proveCredentialAttribute against any root, old
+// proveEventAttendance / proveCredentialAttributes against any root, old
 // or new. Side effect: other holders' proofs built against a pre-burn root
 // fail and must be rebuilt from a fresh path — acceptable since burns are
 // rare compared to proofs.
@@ -812,9 +850,9 @@ export circuit burn(tokenId: Uint<64>): [] {
   burnedTokens.insert(tId, true);
   credentials.insertIndexDefault(tId);
   credentials.resetHistory();
-  // A burned token can't be updated any more: a pending update request is
-  // either answered by this burn (the issuer re-issues next with mintTo)
-  // or moot (the holder or a revocation burned it).
+  // A burned token can't be updated any more, so a pending update request
+  // is moot (the holder or a revocation burned it). An issuer accepting
+  // the request uses reissueCredential instead, which clears it too.
   if (credentialUpdateRequests.member(tId)) {
     credentialUpdateRequests.remove(tId);
   }
@@ -824,14 +862,107 @@ export circuit burn(tokenId: Uint<64>): [] {
   }
 }
 
+// ── Token: Re-issue ───────────────────────────────────────────────────────────
+
+// Replaces a live credential with an updated one for the SAME holder, in
+// one transaction: the old token is burned and a new one is minted to the
+// pseudonym that owned it. This is how an issuer changes a credential's
+// attributes (they are fixed at mint time, see credential_leaf), typically
+// to accept a holder's update request.
+//
+// Atomic on purpose. As two transactions (burn, then mintTo), a mint that
+// fails after the burn went through — the event expired or was deactivated
+// in between, the issuer was blocked, the supply filled up — would leave
+// the holder with no credential at all. Here every check runs before any
+// write, so a failed re-issue leaves the old credential untouched.
+//
+// A replacement does not use up supply: events[eventId].minted is left as
+// is and maxSupply is not checked, since the number of live credentials of
+// the event does not change. totalSupply still grows (it is the tokenId
+// sequence). The event must still be active and inside its expiration
+// window, and its issuer not blocked — the same conditions a first mint
+// has. To invalidate a credential regardless of those, use burn.
+//
+// The old token's (holder, event) slot moves to the new token, and a
+// pending update request on the old token is cleared: this IS its answer.
+// Same root-history reset as burn, so the old credential stops proving
+// against every root, old or new.
+// @circuit   Issuer or admin replaces a holder's credential with a new one.
+// @param     tokenId                     The live token to replace.
+// @param     newMetadataURI              Public metadata URI of the new token.
+// @param     newPrivateMetadataCommit    Its private-fields commitment (zero
+//                                        for none).
+// @param     newCredentialAttributesRoot Root of its attribute tree (zero for
+//                                        none).
+// @auth      The token's issuer, or the admin.
+// @asserts   Not paused; token exists, is not burned; caller is its issuer
+//            or the admin; its event is active and not expired; its issuer
+//            is not blocked; the credential tree is not full.
+// @writes    burnedTokens, credentials (old leaf cleared, new leaf, root
+//            history reset), credentialUpdateRequests (removes tokenId),
+//            totalSupply, tokenOwner, tokenEvent, tokenIssuer,
+//            tokenMetadataURI, tokenPrivateMetadataCommit, eventHolderToken.
+//            NOT events[eventId].minted.
+// @discloses tokenId and the new token's public fields. That the new token
+//            replaces the old one is public (same owner, same transaction).
+// @private   The attribute values behind newCredentialAttributesRoot.
+export circuit reissueCredential(
+                 tokenId: Uint<64>,
+                 newMetadataURI: Opaque<"string">,
+                 newPrivateMetadataCommit: Bytes<32>,
+                 newCredentialAttributesRoot: Bytes<32>
+                 ): [] {
+  const tId = disclose(tokenId);
+  const tokMetaURI = disclose(newMetadataURI);
+  const tokPrivCommit = disclose(newPrivateMetadataCommit);
+  const credAttrRoot = disclose(newCredentialAttributesRoot);
+  assert(!isPaused, "Contract is paused");
+  assert(tokenOwner.member(tId), "Token does not exist");
+  assert(!burnedTokens.member(tId), "Token already burned");
+  const issuerId = tokenIssuer.lookup(tId);
+  assert(is_admin() || issuerId == caller_pk(), "Not authorized to re-issue this token");
+  const evId = tokenEvent.lookup(tId);
+  const ev = events.lookup(evId);
+  assert(ev.isActive, "Event is not active");
+  assert(ev.expiration == 0 as Uint<64> || blockTimeLt(ev.expiration),
+         "Event has expired"
+         );
+  assert(!issuers.member(issuerId) || issuers.lookup(issuerId).isActive,
+         "Issuer is deactivated"
+         );
+  const newTokenId = totalSupply.read();
+  assert(newTokenId < 1048576 as Uint<64>, "Credential tree is full");
+  const ownerPk = tokenOwner.lookup(tId);
+
+  // Retire the old token.
+  burnedTokens.insert(tId, true);
+  credentials.insertIndexDefault(tId);
+  if (credentialUpdateRequests.member(tId)) {
+    credentialUpdateRequests.remove(tId);
+  }
+
+  // Mint its replacement to the same holder pseudonym.
+  totalSupply.increment(1);
+  tokenOwner.insert(newTokenId, ownerPk);
+  tokenEvent.insert(newTokenId, evId);
+  tokenIssuer.insert(newTokenId, issuerId);
+  tokenMetadataURI.insert(newTokenId, tokMetaURI);
+  tokenPrivateMetadataCommit.insert(newTokenId, tokPrivCommit);
+  eventHolderToken.insert(holder_event_key(ownerPk, evId), newTokenId);
+  credentials.insertIndex(credential_leaf(evId, ownerPk, credAttrRoot), newTokenId);
+  // After both leaf writes: only the root that already has the old leaf
+  // cleared and the new one in place stays valid.
+  credentials.resetHistory();
+}
+
 // ── Token: Credential Update Requests ────────────────────────────────────────
 //
 // A credential's attributes are fixed at mint time (credentialAttributesRoot
 // is hashed into its credential leaf), so changing one — e.g. an identity
 // document that was renewed with a new number — means re-issuing the
 // credential. These two circuits are the on-chain half of asking for that:
-// the holder files a request, the issuer either re-issues (burn + mintTo,
-// which also clears the request) or dismisses it.
+// the holder files a request, the issuer either re-issues
+// (reissueCredential, which also clears the request) or dismisses it.
 
 // Files (or replaces) an update request for one of the caller's tokens.
 // payloadCommit is a commitment to the off-chain request the holder sends
@@ -863,8 +994,8 @@ export circuit requestCredentialUpdate(tokenId: Uint<64>, payloadCommit: Bytes<3
 }
 
 // Closes a pending update request without re-issuing (e.g. the new data
-// couldn't be verified). To accept a request, the issuer burns the token
-// and mints the updated credential instead — burn clears the request.
+// couldn't be verified). To accept a request, the issuer calls
+// reissueCredential instead, which clears the request.
 // @circuit   Issuer or admin dismisses a holder's update request.
 // @param     tokenId  The token whose request is dismissed.
 // @auth      The token's issuer, or the admin.
@@ -1103,8 +1234,7 @@ circuit disclosure_request_key(verifier: Bytes<32>, label: Bytes<32>): Bytes<32>
 // @param     setRoot  Merkle root of the accepted values (zero for
 //                     ownership-only).
 // @param     recipient  Holder pseudonym the request is addressed to, or
-//                       zero for an open request. Required (non-zero) for a
-//                       request meant for proveCredentialAttribute.
+//                       zero for an open request.
 // @returns   The derived requestId.
 // @auth      Anyone.
 // @asserts   Not paused; event exists; request id not already used.
@@ -1260,8 +1390,10 @@ export circuit proveAttributeMembershipOnce(
 //   proveEventAttendance  — ANONYMOUS: "I own SOME live token of this
 //                           event", via the credentials tree. Reveals only
 //                           requestId, eventId and a tree root.
-//   proveCredentialAttribute — a predicate over the holder's OWN private
-//                           attributes (set by mintTo), value kept hidden.
+//   proveCredentialAttributes — predicates over the holder's OWN private
+//                           attributes (set by mintTo), values kept
+//                           hidden. Answers a CredentialRequest, not a
+//                           DisclosureRequest (see publishCredentialRequest).
 //
 // Like proveAttributeMembership, all three signal success by not throwing
 // and write nothing: a verifier checks for a successful transaction calling
@@ -1269,7 +1401,7 @@ export circuit proveAttributeMembershipOnce(
 // OPEN request to someone else who holds the same POAP — inherent to any
 // stateless proof; publish one request per verification session.
 //
-// An ADDRESSED request (req.recipient non-zero) closes that gap: all three
+// An ADDRESSED request (req.recipient non-zero) closes that gap: the
 // circuits then also require the prover's own holder pseudonym to equal
 // the recipient, so only that one holder can answer. The price is
 // anonymity — the request names the pseudonym publicly — so the two
@@ -1278,9 +1410,9 @@ export circuit proveAttributeMembershipOnce(
 //
 //   proveTokenOwnership, proveEventAttendance — open or addressed, the
 //                           verifier's choice.
-//   proveCredentialAttribute — addressed ONLY. A holder's private data is
-//                           asked of one person; an open request is
-//                           rejected.
+//   proveCredentialAttributes — addressed ONLY. A holder's private data is
+//                           asked of one person; a credential request
+//                           cannot be published without a recipient.
 
 // Fails unless the request is open or `holderPk` (the prover's pseudonym,
 // always rebuilt from local_sk by the caller of this helper — never a
@@ -1427,66 +1559,134 @@ export circuit proveEventAttendance(
          "Credential not in tree");
 }
 
-// Proves the caller is the holder the request is ADDRESSED to, owns a live
-// token of the request's event, AND that the private attribute req.fieldId
-// committed in THAT credential (via mintTo's credentialAttributesRoot) is a
-// member of the set pinned at req.setRoot — revealing neither the token nor
-// the value. Who answered is public: the request names its recipient.
+// Pins a question of up to four conditions about one holder's credential.
+// The conditions can only be answered together (proveCredentialAttributes),
+// so a verifier who needs several facts about the same person — typically
+// an identity check plus one or more predicates — publishes them as ONE
+// request instead of one request each.
 //
-// Open requests are rejected. With one, any holder of the event whose own
-// attribute satisfied the set could answer, so the person a verifier is
-// actually dealing with could hand the request to someone else who
-// qualifies; the proof would say nothing about THEM.
-// Same pinned-set reasoning as proveAttributeMembership. The attribute
-// root is never an input: it's recomputed from attrPath, so the only way
-// to satisfy the credential-leaf check is with openings the organizer
-// actually committed for this holder.
-// @circuit   Addressed proof of a predicate on one of the recipient's own
-//            private attributes, without revealing its value.
-// @param     requestId          A published disclosure request.
-// @param     value              The attribute's hidden value.
-// @param     rand               The randomness of its commitment.
-// @param     attributePath      Merkle path of the attribute leaf in the
-//                               credential's attribute tree (depth 8).
-// @param     setMembershipPath  Merkle path of value in the verifier's set
-//                               (depth 16).
-// @param     credPath           Merkle path of the credential leaf in
-//                               `credentials` (depth 20).
+// Unused condition slots are all-zero. The first slot must be used. Same
+// caveats as publishDisclosureRequest: the sets are the verifier's choice
+// (a one-value set reveals the value on a successful answer), and the
+// recipient is not checked against tokenOwner.
+// @circuit   A verifier pins a multi-condition question for one holder.
+// @param     label       Verifier-chosen label, hashed into the request id.
+// @param     eventId     The event whose credential the question is about.
+// @param     recipient   Holder pseudonym that must answer. Non-zero.
+// @param     conditions  Up to four (fieldId, setRoot) pairs; zero fieldId
+//                        for an unused slot.
+// @returns   The derived requestId.
+// @auth      Anyone.
+// @asserts   Not paused; event exists; recipient is non-zero; the first
+//            condition is used; request id not already used.
+// @writes    credentialRequests[requestId].
+// @discloses Every argument, the caller's public key (stored as verifier)
+//            and the request id — a request is public by definition.
+export circuit publishCredentialRequest(
+                 label: Bytes<32>,
+                 eventId: Bytes<32>,
+                 recipient: Bytes<32>,
+                 conditions: Vector<4, CredentialCondition>
+                 ): Bytes<32> {
+  assert(!isPaused, "Contract is paused");
+  const lbl = disclose(label);
+  const evId = disclose(eventId);
+  const rcpt = disclose(recipient);
+  const conds = disclose(conditions);
+  assert(events.member(evId), "Event does not exist");
+  assert(rcpt != default<Bytes<32>>, "Request must be addressed to a holder");
+  assert(conds[0].fieldId != default<Bytes<32>>, "Request needs at least one condition");
+  const verifier = caller_pk();
+  const rid = disclose(disclosure_request_key(verifier, lbl));
+  assert(!credentialRequests.member(rid), "Request already published");
+  credentialRequests.insert(rid, CredentialRequest { verifier: verifier, eventId: evId, recipient: rcpt, conditions: conds });
+  return rid;
+}
+
+// One condition of proveCredentialAttributes. For a used slot: (value,
+// rand) opens the credential attribute leaf at attributePath, whose root
+// must be the credential's attribute root, and value is a member of the
+// condition's set. An unused slot (zero fieldId) constrains nothing; the
+// caller passes any well-formed dummy paths for it.
+circuit check_credential_condition(
+          cond: CredentialCondition,
+          credAttrRoot: Bytes<32>,
+          value: Bytes<32>,
+          rand: Bytes<32>,
+          attributePath: MerkleTreePath<8, Bytes<32>>,
+          setMembershipPath: MerkleTreePath<16, Bytes<32>>
+          ): [] {
+  const used = cond.fieldId != default<Bytes<32>>;
+  assert(!used || attributePath.leaf == credential_attr_leaf(cond.fieldId, value, rand),
+         "Path does not match the recomputed leaf");
+  assert(!used || upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field) == credAttrRoot,
+         "Conditions must be answered from the same credential");
+  assert(!used || setMembershipPath.leaf == value, "Set path does not match the hidden value");
+  assert(!used || upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field) == cond.setRoot,
+         "Value is not a member of the requested set");
+}
+
+// Answers a CredentialRequest: proves the caller is the holder the request
+// is addressed to, owns a live credential of the request's event, AND that
+// EVERY condition holds for the private attributes committed in THAT ONE
+// credential (via mintTo's credentialAttributesRoot) — revealing neither
+// the token nor any value. Who answered is public: the request names its
+// recipient.
+//
+// All or nothing: the circuit takes the whole request, so there is no
+// proof of a subset of its conditions. And all conditions are checked
+// against a single attribute root, the one inside the caller's own
+// credential leaf, so they cannot be assembled from two credentials.
+//
+// The attribute root is never an input: it's recomputed from the first
+// condition's attributePath, so the only way to satisfy the
+// credential-leaf check is with openings the organizer actually committed
+// for this holder.
+// @circuit   Addressed proof of up to four predicates on the recipient's
+//            own private attributes, without revealing their values.
+// @param     requestId           A published credential request.
+// @param     values              Per condition: the attribute's hidden value.
+// @param     rands               Per condition: its commitment randomness.
+// @param     attributePaths      Per condition: Merkle path of the attribute
+//                                leaf in the credential's attribute tree
+//                                (depth 8).
+// @param     setMembershipPaths  Per condition: Merkle path of the value in
+//                                the verifier's set (depth 16).
+// @param     credPath            Merkle path of the credential leaf in
+//                                `credentials` (depth 20).
+//            Entries for unused condition slots are ignored.
 // @auth      The request's recipient only: the pseudonym rebuilt from
 //            local_sk must equal req.recipient.
-// @asserts   Request and its event exist; the request is addressed, and to
-//            the caller's pseudonym; the attribute leaf matches
-//            attributePath; the credential leaf rebuilt from the resulting
-//            root matches credPath, whose root is known to `credentials`;
-//            value matches setMembershipPath and hashes up to the request's
-//            setRoot.
+// @asserts   Request and its event exist; the request is addressed to the
+//            caller's pseudonym; for every used condition, the attribute
+//            leaf matches its path, the path leads to the same attribute
+//            root, and the value hashes up to the condition's setRoot; the
+//            credential leaf rebuilt from that root matches credPath, whose
+//            root is known to `credentials`.
 // @writes    none. Also works while the contract is paused.
 // @discloses requestId and the credentials-tree root (see
 //            proveEventAttendance). Through the request, that its recipient
 //            answered.
-// @private   value, rand, all three Merkle paths, the token id and the
+// @private   Every value and rand, all Merkle paths, the token id and the
 //            secret key.
-export circuit proveCredentialAttribute(
+export circuit proveCredentialAttributes(
                  requestId: Bytes<32>,
-                 value: Bytes<32>,
-                 rand: Bytes<32>,
-                 attributePath: MerkleTreePath<8, Bytes<32>>,
-                 setMembershipPath: MerkleTreePath<16, Bytes<32>>,
+                 values: Vector<4, Bytes<32>>,
+                 rands: Vector<4, Bytes<32>>,
+                 attributePaths: Vector<4, MerkleTreePath<8, Bytes<32>>>,
+                 setMembershipPaths: Vector<4, MerkleTreePath<16, Bytes<32>>>,
                  credPath: MerkleTreePath<20, Bytes<32>>
                  ): [] {
   const rid = disclose(requestId);
-  assert(disclosureRequests.member(rid), "Unknown disclosure request");
-  const req = disclosureRequests.lookup(rid);
+  assert(credentialRequests.member(rid), "Unknown credential request");
+  const req = credentialRequests.lookup(rid);
   assert(events.member(req.eventId), "Event does not exist");
   const ev = events.lookup(req.eventId);
-  assert(req.recipient != default<Bytes<32>>, "Request must be addressed to a holder");
   const holderPk = holder_secret_pk(ev.organizer);
-  assert_addressed_to(req, holderPk);
+  assert(req.recipient == holderPk, "Request is addressed to another holder");
 
-  // 1. (value, rand) opens one of this credential's attribute leaves.
-  assert(attributePath.leaf == credential_attr_leaf(req.fieldId, value, rand),
-         "Path does not match the recomputed leaf");
-  const credAttrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePath).field);
+  // 1. The first condition (always used) fixes the credential's attribute root.
+  const credAttrRoot = upgradeFromTransient(merkleTreePathRoot<8, Bytes<32>>(attributePaths[0]).field);
 
   // 2. That attribute root belongs to a live credential of the caller.
   const leaf = credential_leaf(req.eventId, holderPk, credAttrRoot);
@@ -1494,8 +1694,9 @@ export circuit proveCredentialAttribute(
   assert(credentials.checkRoot(disclose(merkleTreePathRoot<20, Bytes<32>>(credPath))),
          "Credential not in tree");
 
-  // 3. The same hidden value is in the verifier's pinned set.
-  assert(setMembershipPath.leaf == value, "Set path does not match the hidden value");
-  const computedSetRoot = upgradeFromTransient(merkleTreePathRoot<16, Bytes<32>>(setMembershipPath).field);
-  assert(computedSetRoot == req.setRoot, "Value is not a member of the requested set");
+  // 3. Every used condition holds for an attribute under that same root.
+  check_credential_condition(req.conditions[0], credAttrRoot, values[0], rands[0], attributePaths[0], setMembershipPaths[0]);
+  check_credential_condition(req.conditions[1], credAttrRoot, values[1], rands[1], attributePaths[1], setMembershipPaths[1]);
+  check_credential_condition(req.conditions[2], credAttrRoot, values[2], rands[2], attributePaths[2], setMembershipPaths[2]);
+  check_credential_condition(req.conditions[3], credAttrRoot, values[3], rands[3], attributePaths[3], setMembershipPaths[3]);
 }

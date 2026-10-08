@@ -69,7 +69,8 @@ export function eventsRouter(db: Pool): Router {
       const { rows } = await db.query(
         `SELECT t.token_id, t.owner_pk, t.issuer_pk, t.first_event_id, t.is_burned,
                 t.minted_block, t.minted_tx, t.burned_block, t.burned_tx,
-                t.token_metadata_uri, t.token_private_metadata_commit, e.metadata_uri
+                t.token_metadata_uri, t.token_private_metadata_commit, t.replaces_token_id,
+                e.metadata_uri
          FROM tokens t
          JOIN events e ON e.event_id = t.first_event_id
          WHERE t.first_event_id = $1

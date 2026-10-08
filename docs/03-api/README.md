@@ -17,7 +17,7 @@ The REST API served by the Velum indexer ([`indexer/src/api/`](../../indexer/src
 | Base URL, preprod | `https://velum-api.adasouls.io` |
 | Base URL, local | `http://localhost:3001` |
 | Audience | The Velum web app. It is also open to third parties: there is no authentication. |
-| Data | Public state of one Velum contract: events, tokens, disclosure requests |
+| Data | Public state of one Velum contract: events, tokens, disclosure requests, credential requests, credential update requests |
 | Implementation | Express 4, in the same process as the indexer, reading Postgres |
 
 The API cannot change anything. Creating events, minting and proving are transactions sent to
@@ -91,6 +91,7 @@ Things to know:
   | `GET /api/events` | `issuerPk` |
   | `GET /api/events/:eventId/tokens` | `includeBurned=false` |
   | `GET /api/disclosure-requests` | `verifierPk`, `recipientPk` |
+  | `GET /api/credential-requests` | `verifierPk`, `recipientPk`, `eventId` |
   | `GET /api/credential-update-requests` | `issuerPk`, `ownerPk`, `status` |
 
 - Order is fixed per endpoint and cannot be changed:
@@ -100,6 +101,7 @@ Things to know:
   | Events | active first, then by creation block ascending |
   | Tokens | by token id ascending |
   | Disclosure requests | by publication block ascending |
+  | Credential requests | by publication block ascending |
 
 ### Errors
 
@@ -112,7 +114,7 @@ Errors from the API's own routes are JSON with one field:
 | Status | When | Body |
 |---|---|---|
 | `400` | `tokenId` is not a number | `{"error":"invalid tokenId"}` |
-| `404` | The event, token or request does not exist | `{"error":"event not found"}`, `"token not found"`, `"disclosure request not found"` |
+| `404` | The event, token or request does not exist | `{"error":"event not found"}`, `"token not found"`, `"disclosure request not found"`, `"credential request not found"` |
 | `404` | The path matches no route | Express's default **HTML** page, not JSON |
 | `410` | `GET /api/tokens/:tokenId/attendance` (removed) | `{"error":"gone — …","note":"…"}` |
 | `500` | Any unexpected failure, including a database error | `{"error":"internal server error"}` |
@@ -182,6 +184,8 @@ hide.
 | `mintedBlock` and `burnedBlock` | When each credential was issued and revoked. Timing can link a mint to something observed off-chain. |
 | `tokenMetadataURI` | If an organizer uses personalized metadata, the content behind the URI may identify the holder. |
 | Disclosure requests | What each verifier is asking, about which event, and when |
+| Credential requests | What each verifier is asking about one holder's credential: every condition's field id and set root, the holder's pseudonym, and when |
+| `replacesTokenId`, `reissuedTokenId` | Which credential replaced which. Both tokens have the same `ownerPk`, so this links nothing new. |
 | Events by organizer, requests by verifier | Everything one organizer or verifier has done |
 
 None of this breaks the contract's guarantees: the API cannot link pseudonyms across organizers
@@ -200,7 +204,7 @@ tie pseudonyms together.
 | HTTP caching | Express adds a weak `ETag`. A request with `If-None-Match` gets `304 Not Modified` when the body is unchanged, but the query still runs. No `Cache-Control` header is sent on API responses. |
 | Static ZK artifacts (`/zk/*`) | `Cache-Control: public, max-age=3600` |
 | Compression | Caddy compresses responses (zstd, gzip) |
-| Response size | Unbounded on list endpoints: `GET /api/events`, `GET /api/disclosure-requests`, `GET /api/credential-update-requests`, `GET /api/events/:eventId/tokens` |
+| Response size | Unbounded on list endpoints: `GET /api/events`, `GET /api/disclosure-requests`, `GET /api/credential-requests`, `GET /api/credential-update-requests`, `GET /api/events/:eventId/tokens` |
 | Query limits | None: no row limit, no statement timeout, no request timeout |
 | Indexed lookups | All filters and joins used by the endpoints are backed by an index; see [Data model](../02-indexer/data-model.md#indexes) |
 

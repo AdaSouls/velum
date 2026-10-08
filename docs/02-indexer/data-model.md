@@ -1,9 +1,11 @@
 # Data model
 
 The schema is in [`indexer/db/migrations/`](../../indexer/db/migrations/): `001_init.sql`
-creates the tables, `002_uint64_columns.sql` widens three columns and
-`003_disclosure_request_recipient.sql` adds `disclosure_requests.recipient_pk` and
-`004_credential_update_requests.sql` adds `credential_update_requests`. Every file is applied on
+creates the tables, `002_uint64_columns.sql` widens three columns,
+`003_disclosure_request_recipient.sql` adds `disclosure_requests.recipient_pk`,
+`004_credential_update_requests.sql` adds `credential_update_requests` and
+`005_credential_requests_and_reissue.sql` adds `credential_requests`,
+`tokens.replaces_token_id` and `credential_update_requests.reissued_token_id`. Every file is applied on
 every start, in name order, and is safe to run repeatedly.
 
 Production runs Postgres 16; the local devnet runs Postgres 15.
@@ -16,6 +18,7 @@ erDiagram
     issuers ||--o{ tokens : "issuer_pk"
     events  ||--o{ tokens : "first_event_id"
     events  ||--o{ disclosure_requests : "event_id"
+    events  ||--o{ credential_requests : "event_id"
     tokens  ||--o| credential_update_requests : "token_id"
 
     issuers {
@@ -55,6 +58,7 @@ erDiagram
         text minted_tx
         bigint burned_block
         text burned_tx
+        bigint replaces_token_id
         timestamptz created_at
     }
     disclosure_requests {
@@ -68,6 +72,16 @@ erDiagram
         text published_tx
         timestamptz created_at
     }
+    credential_requests {
+        text request_id PK
+        text verifier_pk
+        text event_id FK
+        text recipient_pk
+        jsonb conditions
+        bigint published_block
+        text published_tx
+        timestamptz created_at
+    }
     credential_update_requests {
         bigint token_id PK
         text payload_commit
@@ -76,6 +90,7 @@ erDiagram
         text requested_tx
         bigint closed_block
         text closed_tx
+        bigint reissued_token_id
         timestamptz created_at
     }
     disclosure_nullifiers {
@@ -146,6 +161,7 @@ One row per organizer public key that was registered, blocked, or created an eve
 | `is_burned` | `BOOLEAN` | Burned or revoked | presence in `burnedTokens` |
 | `minted_block`, `minted_tx` | `BIGINT`, `TEXT` | Minting transaction | tx |
 | `burned_block`, `burned_tx` | `BIGINT`, `TEXT` | Burning transaction | tx |
+| `replaces_token_id` | `BIGINT`, nullable | The token this one replaced, when it was minted by `reissueCredential`. `NULL` otherwise. Not a foreign key. | derived: the token burned in the same state diff with the same owner and event |
 | `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
 
 ### `disclosure_requests`
@@ -163,6 +179,21 @@ Immutable once inserted.
 | `published_block`, `published_tx` | `BIGINT`, `TEXT` | Publishing transaction | tx |
 | `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
 
+### `credential_requests`
+
+One row per `publishCredentialRequest`. Immutable once inserted. Always addressed, so
+`recipient_pk` is never `NULL`.
+
+| Column | Type | Meaning | Source |
+|---|---|---|---|
+| `request_id` | `TEXT` PK | Request id, hex | key of `credentialRequests` |
+| `verifier_pk` | `TEXT` | Publisher's public key | `credentialRequests[id].verifier` |
+| `event_id` | `TEXT` FK → `events` | Event whose credential is asked about | `.eventId` |
+| `recipient_pk` | `TEXT`, not null | Holder pseudonym that must answer | `.recipient` |
+| `conditions` | `JSONB` | Array of the used conditions, in the request's order: `[{ "slot": 0, "fieldId": "<hex>", "setRoot": "<hex>" }, …]`. `slot` is the condition's position in the on-chain `Vector<4>`, which is where its answer goes in `proveCredentialAttributes`. Unused (all-zero) slots are left out. | `.conditions` |
+| `published_block`, `published_tx` | `BIGINT`, `TEXT` | Publishing transaction | tx |
+| `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
+
 ### `credential_update_requests`
 
 One row per token whose holder ever asked for an update (`requestCredentialUpdate`). The ledger
@@ -173,9 +204,10 @@ dismissal reopens the same row.
 |---|---|---|---|
 | `token_id` | `BIGINT` PK, FK → `tokens` | The token to update | key of `credentialUpdateRequests` |
 | `payload_commit` | `TEXT` | Commitment to the off-chain request, hex | `credentialUpdateRequests[id]` |
-| `status` | `TEXT` | `pending` (on the ledger), `dismissed` (`dismissCredentialUpdate`) or `burned` (removed by `burn`: a re-issue, a revocation or a self-burn) | presence in `credentialUpdateRequests`, and in `burnedTokens` when removed |
+| `status` | `TEXT` | `pending` (on the ledger), `dismissed` (`dismissCredentialUpdate`), `reissued` (removed by `reissueCredential`) or `burned` (removed by `burn`: a revocation or a self-burn) | presence in `credentialUpdateRequests`; when removed, whether the token was replaced in the same state diff, and presence in `burnedTokens` |
 | `requested_block`, `requested_tx` | `BIGINT`, `TEXT` | Latest filing transaction | tx |
 | `closed_block`, `closed_tx` | `BIGINT`, `TEXT` | Transaction that removed it. `NULL` while pending. | tx |
+| `reissued_token_id` | `BIGINT`, nullable | For `reissued`: the token that replaced this one. `NULL` otherwise. Not a foreign key. | derived: the token minted in the same state diff with the same owner and event |
 | `created_at` | `TIMESTAMPTZ` | Row insertion time | — |
 
 ### `disclosure_nullifiers`
@@ -215,6 +247,9 @@ has an action. See [Operation](operations.md#measuring-lag) before using it for 
 | `disclosure_requests_verifier_pk_idx` | `disclosure_requests(verifier_pk)` | `GET /api/disclosure-requests?verifierPk=` |
 | `disclosure_requests_recipient_pk_idx` | `disclosure_requests(recipient_pk)` | `GET /api/disclosure-requests?recipientPk=` |
 | `disclosure_requests_event_id_idx` | `disclosure_requests(event_id)` | not used by a current endpoint |
+| `credential_requests_verifier_pk_idx` | `credential_requests(verifier_pk)` | `GET /api/credential-requests?verifierPk=` |
+| `credential_requests_recipient_pk_idx` | `credential_requests(recipient_pk)` | `GET /api/credential-requests?recipientPk=` |
+| `credential_requests_event_id_idx` | `credential_requests(event_id)` | `GET /api/credential-requests?eventId=` |
 | `credential_update_requests_status_idx` | `credential_update_requests(status)` | `GET /api/credential-update-requests?status=` |
 
 ## Migrations

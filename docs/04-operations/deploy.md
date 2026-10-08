@@ -45,7 +45,7 @@ MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed of a funded wallet> SK
   `MN_TEST_ENVIRONMENT=preprod npx tsx scripts/wallet-info.ts`.
 - The first run on preprod waits for the wallet to replay the network's DUST history, which
   took 1.5–2 hours. Progress is saved in `.wallet-state/` and reused.
-- The deployment is staged: a circuit-less shell, then one transaction per verifier key (20
+- The deployment is staged: a circuit-less shell, then one transaction per verifier key (22
   today, about 25 seconds each on preprod).
 - `SKIP_DEMO_EVENT=1` leaves the contract empty. Without it the script also creates a demo
   event, which has no image and is only useful on a local devnet.
@@ -67,7 +67,7 @@ cd /opt/velum/poap-midnight && git checkout <the commit from step 1>
 cd deploy/production
 cp .env.example .env && chmod 600 .env     # CONTRACT_ADDRESS, network, endpoints, CORS, DB password
 docker compose up -d --build
-docker compose logs -f indexer             # expect: applied 001…004 .sql, [gql-ws] connected
+docker compose logs -f indexer             # expect: applied 001…005 .sql, [gql-ws] connected
 ```
 
 ### 3. ZK artifacts

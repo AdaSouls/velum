@@ -142,6 +142,7 @@ function emptyLedger(): LedgerView {
     burnedTokens:    [],
     usedDisclosures: [],
     disclosureRequests: [],
+    credentialRequests: [],
     credentialUpdateRequests: [],
     isPaused: false,
     adminPk:  new Uint8Array(32),

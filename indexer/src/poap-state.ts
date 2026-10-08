@@ -38,6 +38,7 @@ export async function applyStateDiff(
     await handleTokens(client, prev, curr, meta);
     await handleDisclosures(client, prev, curr, meta);
     await handleDisclosureRequests(client, prev, curr, meta);
+    await handleCredentialRequests(client, prev, curr, meta);
     await handleCredentialUpdateRequests(client, prev, curr, meta);
     await client.query('COMMIT');
     console.log(`[state] ${operation} @ block ${meta.blockHeight} tx ${meta.txHash.slice(0, 16)}…`);
@@ -234,6 +235,35 @@ async function handleTokens(
     );
     console.log(`  [-] token #${tokenId} burned`);
   }
+
+  // Re-issues: reissueCredential burns a token and mints its replacement in the same transaction.
+  for (const { oldTokenId, newTokenId } of findReissues(prev, curr)) {
+    await client.query(
+      `UPDATE tokens SET replaces_token_id = $1 WHERE token_id = $2`,
+      [oldTokenId.toString(), newTokenId.toString()],
+    );
+    console.log(`  [~] token #${newTokenId} replaces #${oldTokenId}`);
+  }
+}
+
+// reissueCredential is the only circuit that burns one token and mints another in a single
+// transaction, the new one to the same holder pseudonym and event. So within one state diff, a
+// newly burned token and a newly minted one with the same owner and event are a re-issue pair.
+function findReissues(prev: LedgerView, curr: LedgerView): { oldTokenId: bigint; newTokenId: bigint }[] {
+  const prevBurned = snapshotMap(prev.burnedTokens, (id) => bigintKey(id));
+  const newlyBurned = [...curr.burnedTokens].map(([id]) => id).filter((id) => !prevBurned.has(bigintKey(id)));
+  if (newlyBurned.length === 0) return [];
+  const prevOwners = snapshotMap(prev.tokenOwner, (id) => bigintKey(id));
+  const owners = snapshotMap(curr.tokenOwner, (id) => bigintKey(id));
+  const events = snapshotMap(curr.tokenEvent, (id) => bigintKey(id));
+  const slot = (id: bigint) => `${toHex(owners.get(bigintKey(id))!.v)}:${toHex(events.get(bigintKey(id))!.v)}`;
+  const minted = [...owners.values()].map(({ k }) => k).filter((id) => !prevOwners.has(bigintKey(id)));
+  const pairs: { oldTokenId: bigint; newTokenId: bigint }[] = [];
+  for (const oldTokenId of newlyBurned) {
+    const newTokenId = minted.find((id) => slot(id) === slot(oldTokenId));
+    if (newTokenId !== undefined) pairs.push({ oldTokenId, newTokenId });
+  }
+  return pairs;
 }
 
 // ── Selective Disclosure ─────────────────────────────────────────────────────────
@@ -306,12 +336,52 @@ async function handleDisclosureRequests(
   }
 }
 
+// ── Credential Requests ───────────────────────────────────────────────────────
+//
+// Multi-condition questions for one holder (publishCredentialRequest). Immutable once published,
+// like disclosure requests, so only "added" matters. Unused condition slots (all-zero fieldId) are
+// dropped: `conditions` holds the used ones, in the request's order.
+
+async function handleCredentialRequests(
+  client: PoolClient,
+  prev: LedgerView,
+  curr: LedgerView,
+  meta: TxMeta,
+): Promise<void> {
+  const prevSnap = snapshotMap(prev.credentialRequests, (bytes) => toHex(bytes));
+  const currSnap = snapshotMap(curr.credentialRequests, (bytes) => toHex(bytes));
+
+  for (const [key, { k, v }] of currSnap) {
+    if (prevSnap.has(key)) continue;
+    const conditions = v.conditions
+      .map((c, slot) => ({ slot, fieldId: toHex(c.fieldId), setRoot: toHex(c.setRoot) }))
+      .filter((c) => /[^0]/.test(c.fieldId));
+    await client.query(
+      `INSERT INTO credential_requests
+         (request_id, verifier_pk, event_id, recipient_pk, conditions, published_block, published_tx)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
+       ON CONFLICT (request_id) DO NOTHING`,
+      [
+        toHex(k),
+        toHex(v.verifier),
+        toHex(v.eventId),
+        toHex(v.recipient),
+        JSON.stringify(conditions),
+        meta.blockHeight.toString(),
+        meta.txHash,
+      ],
+    );
+    console.log(`  [+] credential request ${toHex(k).slice(0, 16)}… published (${conditions.length} conditions)`);
+  }
+}
+
 // ── Credential Update Requests ─────────────────────────────────────────────────
 //
 // The ledger holds only pending requests. Added or updated (the holder filed
 // again with a new commitment) → pending. Removed → closed, and the reason is
-// read from the same diff: if the token is burned in the current state it was
-// burn() (the issuer re-issuing, a revocation or a self-burn), otherwise
+// read from the same diff: a re-issue pair (see findReissues) means the issuer
+// answered it with reissueCredential; otherwise, if the token is burned in the
+// current state it was burn() (a revocation or a self-burn); otherwise
 // dismissCredentialUpdate.
 
 async function handleCredentialUpdateRequests(
@@ -334,12 +404,13 @@ async function handleCredentialUpdateRequests(
          (token_id, payload_commit, status, requested_block, requested_tx)
        VALUES ($1, $2, 'pending', $3, $4)
        ON CONFLICT (token_id) DO UPDATE
-         SET payload_commit  = EXCLUDED.payload_commit,
-             status          = 'pending',
-             requested_block = EXCLUDED.requested_block,
-             requested_tx    = EXCLUDED.requested_tx,
-             closed_block    = NULL,
-             closed_tx       = NULL`,
+         SET payload_commit    = EXCLUDED.payload_commit,
+             status            = 'pending',
+             requested_block   = EXCLUDED.requested_block,
+             requested_tx      = EXCLUDED.requested_tx,
+             closed_block      = NULL,
+             closed_tx         = NULL,
+             reissued_token_id = NULL`,
       [k.toString(), toHex(v), meta.blockHeight.toString(), meta.txHash],
     );
     console.log(`  [+] update request for token #${k} filed`);
@@ -348,12 +419,16 @@ async function handleCredentialUpdateRequests(
   if (diff.removed.length === 0) return;
   const burned = new Set<string>();
   for (const [id] of curr.burnedTokens) burned.add(bigintKey(id));
+  const reissued = new Map<string, bigint>();
+  for (const { oldTokenId, newTokenId } of findReissues(prev, curr)) reissued.set(bigintKey(oldTokenId), newTokenId);
   for (const { k } of diff.removed) {
-    const status = burned.has(bigintKey(k)) ? 'burned' : 'dismissed';
+    const newTokenId = reissued.get(bigintKey(k));
+    const status = newTokenId !== undefined ? 'reissued' : burned.has(bigintKey(k)) ? 'burned' : 'dismissed';
     await client.query(
-      `UPDATE credential_update_requests SET status = $1, closed_block = $2, closed_tx = $3
-       WHERE token_id = $4`,
-      [status, meta.blockHeight.toString(), meta.txHash, k.toString()],
+      `UPDATE credential_update_requests
+         SET status = $1, closed_block = $2, closed_tx = $3, reissued_token_id = $4
+       WHERE token_id = $5`,
+      [status, meta.blockHeight.toString(), meta.txHash, newTokenId?.toString() ?? null, k.toString()],
     );
     console.log(`  [-] update request for token #${k} ${status}`);
   }

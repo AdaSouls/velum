@@ -101,8 +101,9 @@ Metadata that leaks by design or that the contract cannot prevent.
    ties that pseudonym to a person: someone can hand a verifier a qualifying friend's pseudonym
    and have the friend answer. The mitigation is an identity attribute
    (`computeIdentityValue`, [flow 12](circuits.md#12-tie-a-credential-to-identity-documents)),
-   which only helps if the issuer checked the document before issuing and the verifier checks
-   the person's.
+   asked together with the real question in one credential request, so the friend cannot answer
+   the question and skip the identity. It only helps if the issuer checked the document before
+   issuing and the verifier checks the person's.
 10. **The fee payer is outside the contract's control.** Transactions are paid for by a wallet.
     Whether fee payment links a user's transactions to each other or to their wallet has not
     been analysed in this repository; do not assume it does not.
@@ -112,7 +113,8 @@ Metadata that leaks by design or that the contract cannot prevent.
     hosting a shared proof server would hand it every user's key.
 13. **Addressed requests are not anonymous.** The recipient's pseudonym is on the ledger, and a
     successful answer shows that pseudonym answered. Every proof about a credential's private
-    attribute is addressed.
+    attributes is addressed, and the credential request shows every condition asked (field ids
+    and set roots).
 14. **Credential update requests are visible.** Anyone can see that a token's holder asked its
     issuer for an update, and when. What changed stays off-chain.
 
@@ -134,7 +136,7 @@ Metadata that leaks by design or that the contract cannot prevent.
 ```bash
 cd contracts
 npm run compact     # the tests run against the compiled output
-npm test            # 136 tests, about 20 seconds
+npm test            # 148 tests, about 20 seconds
 ```
 
 The suite is [`contracts/src/test/poap.test.ts`](../../contracts/src/test/poap.test.ts), driven
@@ -153,15 +155,16 @@ hostile caller" is modelled.
 | Push-mint | Organizer and admin allowed, others rejected; same event checks; per-token metadata |
 | Pseudonyms | Different per issuer, stable per (wallet, issuer) |
 | Commit-reveal | Event and token level: correct opening accepted, wrong value rejected, zero commitment rejected, reveal is permissionless |
-| Burn and re-issue | Owner, issuer and admin can burn; third party cannot; self-burn frees the slot, revocation does not; re-issue only by issuer or admin |
+| Burn and replacement | Owner, issuer and admin can burn; third party cannot; self-burn frees the slot, revocation does not; after a revocation, a replacement with `mintTo` only by issuer or admin |
 | Disclosure requests | Unknown event rejected, duplicate label rejected, labels do not collide across verifiers |
 | Attribute proofs | Valid proof accepted; rejected for: unpublished request, mismatched set root, wrong opening, tampered path, value outside the set, event without attributes; no ledger writes |
 | Single-use proofs | Nullifier recorded, replay rejected, invented request rejected, different request allowed |
 | Ownership proof | Owner accepted; non-owner, unknown token, wrong event, burned or revoked token rejected; addressed request rejected for an owner who is not the recipient |
 | Anonymous proofs | Fresh and historic paths accepted; another holder's path, a self-built tree, a different event and a burned credential rejected; addressed request rejected for another holder and for a recipient with no credential; root history reset on burn; **the public transcript contains neither the pseudonym nor the leaf** |
-| Credential attributes | Valid proof by the recipient accepted; open request, **another holder with a genuinely qualifying credential**, false value, value outside the set, leaked openings used by another holder, holder without the attribute and revoked credential rejected |
-| Identity documents | `computeIdentityValue` is deterministic and rejects a zero salt; a holder proves their own document; **a borrowed key fails the identity check, even with the friend's salt**; a credential with several documents can be checked against any one of them |
-| Credential update requests | Holder files and replaces a request; only the token's holder can file; missing commitment, unknown or burned token and paused contract rejected; issuer or admin can dismiss, nobody else, and only while pending; re-issue (`burn` + `mintTo`) and a self-burn both clear the request |
+| Credential attributes | Valid proof by the recipient accepted; publishing an open credential request rejected; **another holder with a genuinely qualifying credential**, false value, value outside the set, leaked openings used by another holder, holder without the attribute and revoked credential rejected |
+| Identity documents | `computeIdentityValue` is deterministic and rejects a zero salt; a holder proves their own document; **a borrowed key fails the identity check, even with the friend's salt**; a credential with several documents can be checked against any one of them; one request with identity and grade is answered by a single proof; **a borrowed key cannot answer the grade and skip the identity**; conditions cannot be assembled from two attribute trees; a request can carry four conditions; publishing needs an existing event, a first condition, a fresh label and an unpaused contract |
+| Credential update requests | Holder files and replaces a request; only the token's holder can file; missing commitment, unknown or burned token and paused contract rejected; issuer or admin can dismiss, nobody else, and only while pending; `burn` followed by `mintTo` and a self-burn both clear the request |
+| Atomic re-issue (`reissueCredential`) | Old token retired and its replacement minted to the same holder; pending request cleared; `minted` unchanged and a full event can still re-issue; the new credential proves the new data and the old one stops proving; the holder keeps one slot for the event; only the issuer or the admin; **a re-issue that cannot mint (paused, inactive event, blocked issuer, expired event) leaves the old credential untouched** |
 
 Tests that reject invalid private inputs are the ones to keep when refactoring: they are what
 shows an `assert` actually constrains something. Two are regression tests for exploits that
@@ -170,9 +173,14 @@ worked against an earlier version (marked `C-1` and `H-1` in the test names).
 What the suite does not do:
 
 - It does not generate or verify real proofs. It checks circuit logic, not the proof system.
-- There is no end-to-end test against a devnet in this repository for the contract itself.
-  [`indexer/src/integration.test.ts`](../../indexer/src/integration.test.ts) covers the indexer.
-- Only `claim` is tested under pause; the other circuits' pause checks are not.
+- The only end-to-end test against a devnet, with real proofs and transactions, is
+  [`scripts/e2e-credential-flow.ts`](../../scripts/e2e-credential-flow.ts). It covers
+  `createEvent`, `mintTo`, `publishCredentialRequest`, `proveCredentialAttributes` and
+  `reissueCredential`, and is run by hand, not in CI. The other circuits are only tested in the
+  simulator. [`indexer/src/integration.test.ts`](../../indexer/src/integration.test.ts) covers
+  the indexer.
+- The pause check is tested for `claim`, `requestCredentialUpdate`, `publishCredentialRequest`
+  and `reissueCredential` only.
 - The pure helper `computeCredentialAttrLeaf` and off-chain tree building are exercised only
   through the proofs that use them.
 
@@ -197,8 +205,9 @@ compiled contract. Its findings and fixes, from the commit history:
 | — | Low | `adminPk` was writable in principle. | Declared `sealed`. | `f671ab1` |
 
 The review report itself is not in this repository. The circuits added afterwards
-(`proveTokenOwnership`, `proveEventAttendance`, `proveCredentialAttribute`, the moderation
-changes and re-issue after revocation) have not been covered by a recorded review.
+(`proveTokenOwnership`, `proveEventAttendance`, `publishCredentialRequest`,
+`proveCredentialAttributes`, `reissueCredential`, the moderation changes and re-issue after
+revocation) have not been covered by a recorded review.
 
 ## Changelog
 

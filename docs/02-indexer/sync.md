@@ -126,7 +126,7 @@ docker compose logs -f indexer      # watch the replay
 docker compose -f devnet.yml down -v       # wipes the devnet and the indexer database
 # or, to keep the chain and reset only the indexer's tables:
 psql postgresql://poap:poap@localhost:5434/poap_indexer -c \
-  "TRUNCATE credential_update_requests, tokens, events, issuers, disclosure_requests, disclosure_nullifiers, indexer_cursor CASCADE;
+  "TRUNCATE credential_update_requests, credential_requests, tokens, events, issuers, disclosure_requests, disclosure_nullifiers, indexer_cursor CASCADE;
    INSERT INTO indexer_cursor (id) VALUES (1);"
 ```
 
