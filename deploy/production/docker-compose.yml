@@ -125,8 +125,10 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
       MIDNIGHT_NETWORK_ID: ${MIDNIGHT_NETWORK_ID}
       BLOCKFROST_PROJECT_ID: ${BLOCKFROST_PROJECT_ID}
-      MAINNET_API_DOMAIN: ${MAINNET_API_DOMAIN:-}
-      MAINNET_BLOCKFROST_PROJECT_ID: ${MAINNET_BLOCKFROST_PROJECT_ID:-}
+      # Never empty: Caddy rejects a site block with no address. Without a mainnet host the
+      # block listens on :8081, which nothing publishes.
+      MAINNET_API_DOMAIN: ${MAINNET_API_DOMAIN:-:8081}
+      MAINNET_BLOCKFROST_PROJECT_ID: ${MAINNET_BLOCKFROST_PROJECT_ID:-unset}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./zk:/srv/zk:ro
