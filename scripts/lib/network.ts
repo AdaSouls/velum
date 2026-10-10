@@ -140,6 +140,32 @@ const LOCAL_ENV_CONFIG: EnvironmentConfiguration = {
   faucet: undefined,
 };
 
+// Midnight's own public indexer and RPC for preprod and mainnet were decommissioned on
+// 2026-10-09; both are served by Blockfrost now, one project per network
+// (docs.midnight.network/guides/networks-and-environments). The project id goes in the query
+// string — a WebSocket can't carry it as a header from every client the SDK uses. testkit-js
+// 4.1.1 still has the old preprod URLs and no mainnet at all, so these two are built here.
+export const BLOCKFROST_NETWORKS = ['preprod', 'mainnet'];
+
+export function blockfrostEnvConfig(network: string, projectId: string): EnvironmentConfiguration {
+  const q = `?project_id=${projectId}`;
+  return {
+    walletNetworkId: network,
+    networkId: network,
+    indexer: `https://midnight-${network}.blockfrost.io/api/v0${q}`,
+    indexerWS: `wss://midnight-${network}.blockfrost.io/api/v0/ws${q}`,
+    node: `https://rpc.midnight-${network}.blockfrost.io${q}`,
+    nodeWS: `wss://rpc.midnight-${network}.blockfrost.io${q}`,
+    proofServer: 'http://127.0.0.1:6300',
+    faucet: network === 'preprod' ? 'https://faucet.preprod.midnight.network/api/drips' : undefined,
+  };
+}
+
+// Never log a URL that carries the Blockfrost project id.
+export function redactProjectId(text: string): string {
+  return text.replace(/project_id=[A-Za-z0-9]+/g, 'project_id=<hidden>');
+}
+
 export function resolveNetwork(
   targetNetwork: string,
   logger: Logger,
@@ -160,6 +186,21 @@ export function resolveNetwork(
           `a seed and get the address to fund via that network's faucet, then re-run with ` +
           `MN_TEST_WALLET_SEED set to it.`,
       );
+    }
+
+    if (BLOCKFROST_NETWORKS.includes(targetNetwork)) {
+      const projectId = process.env.BLOCKFROST_PROJECT_ID ?? '';
+      if (!projectId.startsWith(`night${targetNetwork}`)) {
+        throw new Error(
+          `BLOCKFROST_PROJECT_ID is required when MN_TEST_ENVIRONMENT=${targetNetwork}, and must be a ` +
+            `Midnight ${targetNetwork} project (it starts with "night${targetNetwork}"). Create one at ` +
+            `blockfrost.io.`,
+        );
+      }
+      envConfig = blockfrostEnvConfig(targetNetwork, projectId);
+      setNetworkId(envConfig.networkId);
+      logger.info(`Network config: ${redactProjectId(JSON.stringify(envConfig))}`);
+      return { envConfig, seedHex };
     }
 
     // getTestEnvironment() reads MN_TEST_ENVIRONMENT itself, picks the matching
@@ -327,9 +368,13 @@ export async function startFundedWallet(
   const NIGHT_TOKEN_TYPE = nativeToken().raw;
   const nightBalance = syncedState.unshielded.balances[NIGHT_TOKEN_TYPE] ?? 0n;
   logger.info(`Wallet NIGHT balance: ${nightBalance}`);
+  // No NIGHT on Midnight is not fatal by itself: on mainnet NIGHT usually stays on Cardano and is
+  // only designated to generate DUST for a Midnight address, so a wallet can pay fees while its
+  // unshielded balance here reads 0. Fees are paid in DUST; that is what gets checked below.
   if (nightBalance === 0n) {
-    throw new Error(
-      `Wallet has no NIGHT — fund it via ${envConfig.faucet ?? "the network's faucet"} and retry.`,
+    logger.warn(
+      `No NIGHT at ${wallet.unshieldedKeystore.getBech32Address().asString()} on ${envConfig.networkId}. ` +
+        'Carrying on to see whether this wallet has DUST (generated from NIGHT held on Cardano).',
     );
   }
 
@@ -389,6 +434,13 @@ export async function startFundedWallet(
     await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
   }
   await saveWalletState(logger, wallet, stateFile);
+  if (dustBalance === 0n && nightBalance === 0n) {
+    await wallet.stop();
+    throw new Error(
+      `Wallet has neither NIGHT nor DUST on ${envConfig.networkId}, so it can't pay fees. ` +
+        (envConfig.faucet ? `Fund it via ${envConfig.faucet} and retry.` : 'Check that this is the funded wallet.'),
+    );
+  }
   if (dustBalance === 0n) {
     logger.warn(
       `DUST balance still 0 after ${Math.round((Date.now() - dustPollStart) / 60_000)}min — deploy will likely fail with an insufficient-fee error. ` +

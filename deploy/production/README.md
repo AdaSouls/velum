@@ -18,7 +18,14 @@ https://$API_DOMAIN/health               → indexer
 https://$API_DOMAIN/api/events|tokens|…  → indexer
 https://$API_DOMAIN/api/ipfs/*, /api/backup, /api/credential-delivery, /api/disclosure-sets, /api/credential-update → ipfs-proxy (optional)
 https://$API_DOMAIN/zk/poap/…            → static ZK artifacts
+https://$API_DOMAIN/midnight/indexer(/ws) → Midnight's indexer at Blockfrost (adds the project id)
 ```
+
+Midnight's own public indexer and RPC were decommissioned on 2026-10-09. Both are served by
+Blockfrost now and need a project id, one project per network (`BLOCKFROST_PROJECT_ID` in `.env`,
+from a "Midnight Preprod" or "Midnight Mainnet" project at blockfrost.io). The indexer app uses it
+directly. The frontend never sees it: it reads the chain through `/midnight/indexer`, which Caddy
+forwards to Blockfrost with the project id added.
 
 Verified locally (podman, 2026-09-24): the image builds, migrations apply, the indexer connects to
 the preprod indexer over WebSocket, CORS is applied, and Caddy serves `/health`, `/api/*` and
@@ -150,6 +157,18 @@ signatures unchanged, i.e. no diff in `contracts/src/managed/poap/contract/index
    `docker compose down && docker volume rm velum_pgdata && docker compose up -d --build`
 5. Update `REACT_APP_MIDNIGHT_CONTRACT_ADDRESS` on Vercel and redeploy the frontend.
 
+**A second network on the same server (mainnet)** — routed by host name through the same Caddy,
+so it needs no extra public port and no second server:
+
+1. DNS: an `A` record for the mainnet API host (e.g. `mainnet-api.example.com`) to this server.
+2. In `.env`: the `MAINNET_*` values (see `.env.example`) and `COMPOSE_PROFILES=mainnet`
+   (`ipfs,mainnet` if the IPFS proxy is on).
+3. `docker compose up -d --build`, then `docker compose logs -f indexer-mainnet`.
+
+It runs the same indexer image and serves the same ZK artifacts, so the mainnet contract must be
+the same build as the one in `CONTRACT_ADDRESS`. It has its own database (`velum_pgdata_mainnet`)
+and its own IPFS proxy instance, because that proxy allows a single origin.
+
 **Backups** — the database is fully rebuildable from the chain (the indexer re-syncs from block
 0), so backups mainly save re-sync time:
 
@@ -179,6 +198,7 @@ Environment variables (Production):
 | `REACT_APP_MIDNIGHT_NETWORK_ID` | `preprod` |
 | `REACT_APP_MIDNIGHT_CONTRACT_ADDRESS` | same as `CONTRACT_ADDRESS` above |
 | `REACT_APP_MIDNIGHT_INDEXER_API_URL` | `https://$API_DOMAIN` |
+| `REACT_APP_MIDNIGHT_INDEXER_GRAPHQL_URL` | `https://$API_DOMAIN/midnight/indexer` (never a Blockfrost URL: it would publish the project id) |
 | `REACT_APP_IPFS_API_URL` | `https://$API_DOMAIN` (if the IPFS profile is on) |
 | `REACT_APP_MIDNIGHT_PROOF_SERVER_URL` | see below |
 | `REACT_APP_API_BASE_URL`, `REACT_APP_BLOCKFROST_*`, `REACT_APP_ADMIN_WALLET_ADDRESSES` | as today |

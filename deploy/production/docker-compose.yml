@@ -36,8 +36,10 @@ services:
     environment:
       CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:?set CONTRACT_ADDRESS in .env}
       MIDNIGHT_NETWORK_ID: ${MIDNIGHT_NETWORK_ID:?set MIDNIGHT_NETWORK_ID in .env}
-      MIDNIGHT_INDEXER_WS: ${MIDNIGHT_INDEXER_WS:?set MIDNIGHT_INDEXER_WS in .env}
-      MIDNIGHT_INDEXER_URL: ${MIDNIGHT_INDEXER_URL:?set MIDNIGHT_INDEXER_URL in .env}
+      # Midnight's indexer is served by Blockfrost since 2026-10-09; the project id goes in the
+      # query string.
+      MIDNIGHT_INDEXER_WS: wss://midnight-${MIDNIGHT_NETWORK_ID}.blockfrost.io/api/v0/ws?project_id=${BLOCKFROST_PROJECT_ID:?set BLOCKFROST_PROJECT_ID in .env}
+      MIDNIGHT_INDEXER_URL: https://midnight-${MIDNIGHT_NETWORK_ID}.blockfrost.io/api/v0?project_id=${BLOCKFROST_PROJECT_ID}
       DATABASE_URL: postgresql://velum:${POSTGRES_PASSWORD}@postgres:5432/velum
       PORT: '3001'
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in .env}
@@ -58,6 +60,57 @@ services:
       PORT: '4000'
       CORS_ALLOWED_ORIGIN: ${FRONTEND_ORIGIN:-}
 
+  # ── Optional second network: mainnet (enable with COMPOSE_PROFILES=mainnet, or ipfs,mainnet) ──
+  # Same indexer image as above, so both networks must run the same contract build. Its own
+  # Postgres, because the indexer's rows and cursor belong to one contract.
+  postgres-mainnet:
+    profiles: ['mainnet']
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: velum
+      POSTGRES_DB: velum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata_mainnet:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U velum -d velum']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer-mainnet:
+    profiles: ['mainnet']
+    image: velum-indexer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres-mainnet:
+        condition: service_healthy
+      indexer:
+        condition: service_started
+    environment:
+      CONTRACT_ADDRESS: ${MAINNET_CONTRACT_ADDRESS:-}
+      MIDNIGHT_NETWORK_ID: mainnet
+      MIDNIGHT_INDEXER_WS: wss://midnight-mainnet.blockfrost.io/api/v0/ws?project_id=${MAINNET_BLOCKFROST_PROJECT_ID:-}
+      MIDNIGHT_INDEXER_URL: https://midnight-mainnet.blockfrost.io/api/v0?project_id=${MAINNET_BLOCKFROST_PROJECT_ID:-}
+      DATABASE_URL: postgresql://velum:${POSTGRES_PASSWORD}@postgres-mainnet:5432/velum
+      PORT: '3001'
+      CORS_ALLOWED_ORIGINS: ${MAINNET_CORS_ALLOWED_ORIGINS:-}
+
+  # The IPFS proxy allows exactly one origin, so the mainnet frontend gets its own instance.
+  ipfs-proxy-mainnet:
+    profiles: ['mainnet']
+    image: docker.io/library/node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ${FRONTEND_SERVER_DIR:-./ipfs-proxy-src}:/src:ro
+    command: ['sh', '-c', 'cp -r /src/. /app && npm ci --omit=dev --no-audit --no-fund && exec node index.js']
+    environment:
+      PINATA_JWT: ${PINATA_JWT:-}
+      PORT: '4000'
+      CORS_ALLOWED_ORIGIN: ${MAINNET_FRONTEND_ORIGIN:-}
+
   caddy:
     image: docker.io/library/caddy:2
     restart: unless-stopped
@@ -70,6 +123,10 @@ services:
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      MIDNIGHT_NETWORK_ID: ${MIDNIGHT_NETWORK_ID}
+      BLOCKFROST_PROJECT_ID: ${BLOCKFROST_PROJECT_ID}
+      MAINNET_API_DOMAIN: ${MAINNET_API_DOMAIN:-}
+      MAINNET_BLOCKFROST_PROJECT_ID: ${MAINNET_BLOCKFROST_PROJECT_ID:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./zk:/srv/zk:ro
@@ -78,5 +135,6 @@ services:
 
 volumes:
   pgdata:
+  pgdata_mainnet:
   caddy_data:
   caddy_config:

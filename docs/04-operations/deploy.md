@@ -41,6 +41,9 @@ MN_TEST_ENVIRONMENT=preprod MN_TEST_WALLET_SEED=<hex seed of a funded wallet> SK
   npx tsx scripts/deploy.ts
 ```
 
+- `preprod` and `mainnet` go through Blockfrost and need `BLOCKFROST_PROJECT_ID` (a Midnight
+  project of that network, from blockfrost.io) next to the seed. Midnight's own public indexer
+  and RPC were decommissioned on 2026-10-09.
 - Get a wallet and the address to fund with
   `MN_TEST_ENVIRONMENT=preprod npx tsx scripts/wallet-info.ts`.
 - The first run on preprod waits for the wallet to replay the network's DUST history, which

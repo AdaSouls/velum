@@ -39,7 +39,8 @@ import { initContractModule } from './parser.js';
 async function main() {
   console.log('=== AdaSouls POAP Indexer ===');
   console.log(`  contract : ${config.contractAddress}`);
-  console.log(`  indexer  : ${config.indexerWs}`);
+  // The URL carries the Blockfrost project id as a query parameter. Keep it out of the logs.
+  console.log(`  indexer  : ${config.indexerWs.replace(/project_id=[^&]+/, 'project_id=<hidden>')}`);
   console.log(`  db       : ${config.dbUrl.replace(/:\/\/.*@/, '://<hidden>@')}`);
   console.log();
 

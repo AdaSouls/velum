@@ -52,7 +52,10 @@ globalThis.WebSocket = WebSocket;
 import pino from 'pino';
 import { generateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { MidnightWalletProvider, getTestEnvironment } from '@midnight-ntwrk/testkit-js';
+import { MidnightWalletProvider, getTestEnvironment, type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+
+import { BLOCKFROST_NETWORKS, blockfrostEnvConfig } from './lib/network.js';
 
 const logger = pino({
   level: process.env['LOG_LEVEL'] ?? 'info',
@@ -72,8 +75,16 @@ async function main() {
   // subclass, and calls setNetworkId() as a side effect. The proofServer override doesn't
   // actually matter for this script (build() below never contacts it), but keeps envConfig
   // consistent with what deploy.ts would use for the same network.
-  const testEnv = getTestEnvironment(logger);
-  const envConfig = { ...testEnv.getEnvironmentConfiguration(), proofServer: 'http://localhost:6300' };
+  // preprod and mainnet are served by Blockfrost (see lib/network.ts) and testkit-js has no
+  // mainnet environment. Nothing here contacts the network, so the project id is optional.
+  let envConfig: EnvironmentConfiguration;
+  if (BLOCKFROST_NETWORKS.includes(targetNetwork)) {
+    envConfig = blockfrostEnvConfig(targetNetwork, process.env.BLOCKFROST_PROJECT_ID ?? 'unset');
+    setNetworkId(envConfig.networkId);
+  } else {
+    const testEnv = getTestEnvironment(logger);
+    envConfig = { ...testEnv.getEnvironmentConfiguration(), proofServer: 'http://localhost:6300' };
+  }
 
   let seedHex = process.env.MN_TEST_WALLET_SEED;
   let mnemonic = process.env.MN_TEST_WALLET_MNEMONIC;
