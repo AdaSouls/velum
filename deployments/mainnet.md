@@ -26,6 +26,10 @@ Deployed to meet the Catalyst change request. Day-to-day testing stays on prepro
 
 ## API host
 
-Not live yet. Planned: `https://mainnet.velum.adasouls.io` (frontend) and a second indexer on the
-existing API host (compose profile `mainnet`, see
-[`deploy/production/README.md`](../deploy/production/README.md)).
+| Field | Value |
+|---|---|
+| API | `https://mainnet-api.velum.adasouls.io` (the `mainnet` profile of `deploy/production/`, on the same server as preprod) |
+| Midnight indexer (GraphQL) | `https://mainnet-api.velum.adasouls.io/midnight/indexer`, proxied to Blockfrost |
+| Frontend | `https://mainnet.velum.adasouls.io` (Vercel, `velum-app` branch `main`) |
+| Live since | 2026-10-10 |
+| Serving | The contract above |
