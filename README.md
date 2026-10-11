@@ -19,10 +19,60 @@ soulbound credentials that holders can prove things about **without revealing th
 
 This repository contains the Compact smart contract, the indexer that serves its state over a
 REST API, deployment tooling, and the production setup for the API host. The web app lives in a
-separate repository (`AdaSouls/POAP-Frontend`).
+separate repository ([`AdaSouls/velum-app`](https://github.com/AdaSouls/velum-app)).
 
-> **Status:** running on Midnight **preprod**. Current deployment records are in
-> [`deployments/`](deployments/).
+> **Status:** deployed on Midnight **mainnet** since 10 Oct 2026, and on **preprod**, where
+> day-to-day testing happens. Deployment records are in [`deployments/`](deployments/).
+
+## Live deployments and project outputs
+
+Everything delivered by the project, in one place.
+
+### On-chain
+
+| | Midnight mainnet | Midnight preprod |
+|---|---|---|
+| Contract address | [`9b253fc7796e247e98481ef7d4e3eca64b62f9493bafeafcb8d06b889866e029`](https://www.midnightexplorer.com/contracts/9b253fc7796e247e98481ef7d4e3eca64b62f9493bafeafcb8d06b889866e029) | `5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255` |
+| Deploy transaction | [`ccf1d147880d12d3419748764cfadc362bc5fceac6144d6bf22f20a7376f9ec6`](https://www.midnightexplorer.com/transactions/ccf1d147880d12d3419748764cfadc362bc5fceac6144d6bf22f20a7376f9ec6) | `75e908a2655473a8ece5040b756becb32fc33f679e0c4d686944b42308f090f1` |
+| Deployed | 10 Oct 2026, block 2949527 | 8 Oct 2026 |
+| Circuits | 22 | 22 |
+| Record | [`deployments/mainnet.md`](deployments/mainnet.md) | [`deployments/preprod.md`](deployments/preprod.md) |
+
+Both run the same contract build (commit `77e4ed8`).
+
+### Apps and API
+
+| | Mainnet | Preprod |
+|---|---|---|
+| Web app | <https://mainnet.velum.adasouls.io> | <https://velum.adasouls.io> |
+| REST API | <https://mainnet-api.velum.adasouls.io/health> | <https://velum-api.adasouls.io/health> |
+| Midnight indexer (GraphQL) | `https://mainnet-api.velum.adasouls.io/midnight/indexer` | `https://velum-api.adasouls.io/midnight/indexer` |
+| User guide | <https://mainnet.velum.adasouls.io/docs> | <https://velum.adasouls.io/docs> |
+
+The GraphQL endpoint is Midnight's own indexer, reached through the API host. For example, the
+contract's latest on-chain action and state:
+
+```bash
+curl -s -X POST https://mainnet-api.velum.adasouls.io/midnight/indexer \
+  -H 'content-type: application/json' \
+  -d '{"query":"{ contractAction(address: \"9b253fc7796e247e98481ef7d4e3eca64b62f9493bafeafcb8d06b889866e029\") { __typename state transaction { hash block { height } } } }"}'
+```
+
+### Code, documentation and reports
+
+| Output | Where |
+|---|---|
+| Contract, indexer, API and deployment tooling | this repository |
+| Web app | [`AdaSouls/velum-app`](https://github.com/AdaSouls/velum-app) |
+| Documentation | [`docs/`](docs/README.md) |
+| End-to-End Testing Report v2.0 | [Google Docs](https://docs.google.com/document/d/1NLLx5YJVtBIt5heLHXM3-dhhVUAEs3zsBzt4vxIPpKs/edit?usp=sharing) |
+| Performance, Usability & Reliability Report v2.0 | [Google Docs](https://docs.google.com/document/d/156AoKpXqG2Z3FL9pLxk4oiXY-iKShqstqYdljdfzAxU/edit?usp=sharing) |
+| Project Closure Report v2.0 | [Google Docs](https://docs.google.com/document/d/1A2BTFzfufKEfhpVJ-3kYKkdkE7SW9gg6QC2G70l38SQ/edit?usp=sharing) |
+| Close-out video | _to be added_ |
+| Community | [adasouls.io/discord/velum](https://adasouls.io/discord/velum) |
+
+Velum is the final delivery of *POAP in Cardano* (Project Catalyst Fund 11, project
+[1100234](https://milestones.projectcatalyst.io/projects/1100234)).
 
 ---
 
@@ -157,7 +207,7 @@ found while writing it.
 | [`contracts/src/test/`](contracts/src/test/) | Contract tests (simulator + Jest) |
 | [`contracts/src/witnesses.ts`](contracts/src/witnesses.ts) | Witness implementations (holder secret key, local token cache) |
 | [`indexer/`](indexer/) | Follows the contract through Midnight's indexer, stores state in Postgres, and serves the REST API (`/api/events`, `/api/tokens`, `/api/disclosure-requests`, `/api/credential-update-requests`) from the same process |
-| [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet or preprod) |
+| [`scripts/deploy.ts`](scripts/deploy.ts) | Deploys the contract (local devnet, preprod or mainnet) |
 | [`scripts/upgrade.ts`](scripts/upgrade.ts) | Upgrades the deployed contract's circuits in place (same address) |
 | [`scripts/e2e-credential-flow.ts`](scripts/e2e-credential-flow.ts) | End-to-end smoke test on the local devnet: a multi-condition request and a re-issue, with real proofs |
 | [`deploy/production/`](deploy/production/) | Docker Compose stack + runbook for the API host |
