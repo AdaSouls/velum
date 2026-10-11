@@ -38,6 +38,11 @@ export const config = {
   // the Midnight SDK generation, just merged into the same compose file for convenience)
   dbUrl:           process.env.DATABASE_URL           ?? 'postgresql://poap:poap@localhost:5434/poap_indexer',
   apiPort:         Number(process.env.PORT ?? 3001),
+  // Block to start from on an empty database: the contract's deployment block. Optional, but
+  // without it the first subscription asks Midnight's indexer to search from genesis, which on
+  // mainnet never answered (2026-10-11, Blockfrost: no action in 2 minutes, against 6 seconds
+  // with a start block). Ignored once the cursor has moved.
+  startBlock:      Number(process.env.START_BLOCK ?? 0),
   // Comma-separated allowlist of origins allowed to call the API cross-origin, e.g.
   // "http://localhost:5173,https://staging.adasouls.io". Unset (the default) disables
   // CORS entirely — same-origin only. Never falls back to "*".

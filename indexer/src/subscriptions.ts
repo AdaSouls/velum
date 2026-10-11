@@ -23,6 +23,7 @@ import type { Pool } from 'pg';
 import { parseState, type LedgerView } from './parser.js';
 import { applyStateDiff, type TxMeta } from './poap-state.js';
 import { loadCursor, saveCursor } from './db.js';
+import { config } from './config.js';
 
 const CONTRACT_SUB = `
   subscription ContractSub($address: HexEncoded!, $offset: BlockOffset) {
@@ -45,7 +46,7 @@ export async function startSubscription(
   parse: (stateHex: string) => LedgerView = parseState,
 ): Promise<void> {
   const { lastBlock, lastState } = await loadCursor();
-  console.log(`[sub] resuming from block ${lastBlock}`);
+  console.log(`[sub] resuming from block ${lastBlock > 0n ? lastBlock : config.startBlock}`);
 
   // Restore previous ledger state for diffing (empty on first run)
   let prevLedger: LedgerView = lastState ? parse(lastState) : emptyLedger();
@@ -59,7 +60,8 @@ export async function startSubscription(
   // BlockOffset.height is Int in the indexer-standalone v4 schema, not String —
   // sending a string here fails GraphQL variable coercion on resubscribe after a
   // restart (only path where lastBlock > 0), which silently kills the subscription.
-  const offset = lastBlock > 0n ? { height: Number(lastBlock) } : undefined;
+  const startHeight = lastBlock > 0n ? Number(lastBlock) : config.startBlock;
+  const offset = startHeight > 0 ? { height: startHeight } : undefined;
 
   return new Promise<void>((resolve, reject) => {
     const cleanup = client.subscribe<{ contractActions: ContractEvent }>(
