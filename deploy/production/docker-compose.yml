@@ -35,6 +35,7 @@ services:
         condition: service_healthy
     environment:
       CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:?set CONTRACT_ADDRESS in .env}
+      START_BLOCK: ${START_BLOCK:-0}
       MIDNIGHT_NETWORK_ID: ${MIDNIGHT_NETWORK_ID:?set MIDNIGHT_NETWORK_ID in .env}
       # Midnight's indexer is served by Blockfrost since 2026-10-09; the project id goes in the
       # query string.
@@ -90,6 +91,7 @@ services:
         condition: service_started
     environment:
       CONTRACT_ADDRESS: ${MAINNET_CONTRACT_ADDRESS:-}
+      START_BLOCK: ${MAINNET_START_BLOCK:-0}
       MIDNIGHT_NETWORK_ID: mainnet
       MIDNIGHT_INDEXER_WS: wss://midnight-mainnet.blockfrost.io/api/v0/ws?project_id=${MAINNET_BLOCKFROST_PROJECT_ID:-}
       MIDNIGHT_INDEXER_URL: https://midnight-mainnet.blockfrost.io/api/v0?project_id=${MAINNET_BLOCKFROST_PROJECT_ID:-}
