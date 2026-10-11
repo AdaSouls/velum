@@ -6,14 +6,16 @@ procedures (behind, stuck, reorg) are in
 
 ## What exists today
 
-Be clear about the starting point: **there is no monitoring.** No metrics endpoint, no
-dashboards, no alerts, no access logs. What exists:
+Be clear about the starting point: there are **no metrics, dashboards, alerts or access logs.**
+The one thing that runs is an external uptime sample (see [Uptime sampling](#uptime-sampling)).
+What exists:
 
 | Signal | Where |
 |---|---|
 | Liveness of the indexer process | `GET /health`, and the container health check built on it |
 | Indexer activity and errors | Container logs (`docker compose logs indexer`) |
-| Indexing position | `indexer_cursor` table |
+| Indexing position | `GET /api/status` (the `indexer_cursor` table) |
+| Uptime samples | The run history of the `Uptime (mainnet)` and `Uptime (preprod)` workflows |
 | Container state | `docker compose ps` |
 | TLS certificate | Renewed automatically by Caddy; failures appear in Caddy's logs |
 
@@ -29,7 +31,7 @@ An external monitor that runs these every minute covers most failures.
 | 2 | `GET https://$API_DOMAIN/api/events` | `200`, a JSON array | Database down (`500`) |
 | 3 | `HEAD https://$API_DOMAIN/zk/poap/keys/claim.verifier` | `200` | Missing ZK artifacts: users cannot prove |
 | 4 | Indexer log contains no `[sub] error handling event` in the last 5 minutes | none | A skipped action; if repeating, a stalled indexer |
-| 5 | Freshness: the contract's latest action on the Midnight indexer vs `indexer_cursor.last_block` | equal within a few minutes | Stalled or disconnected indexer |
+| 5 | Freshness: the contract's latest action on the Midnight indexer vs `lastBlock` from `GET /api/status` | equal within a few minutes | Stalled or disconnected indexer |
 | 6 | Consistency: `events.minted` vs token rows; ledger counts vs row counts | equal | Rows written by an older indexer version, missed data |
 | 7 | Disk usage on the host | below 80 % | Postgres or Docker filling the disk |
 | 8 | Container restart count | stable | Crash loop |
@@ -37,6 +39,22 @@ An external monitor that runs these every minute covers most failures.
 Check 1 alone is not enough. `/health` stays `ok` while indexing is stalled, so a monitor that
 only watches it will miss the most likely data incident. Checks 4 and 5 are the ones that catch
 it.
+
+### Uptime sampling
+
+Two GitHub Actions workflows, one per network, run [`scripts/uptime-check.sh`](../../scripts/uptime-check.sh)
+every 5 minutes from GitHub's runners. It covers the web app, checks 1 and 2, and check 5
+(stale when the indexer is behind a contract action that is more than 5 minutes old). A run
+fails when any check fails, so each run is one uptime sample:
+
+```bash
+scripts/uptime-report.sh mainnet 30    # samples, passes, failures and uptime % over 30 days
+```
+
+Limits: GitHub schedules are best-effort (runs can start late or be dropped), run only from the
+default branch, and are disabled after 60 days without repository activity. It records, it does
+not alert: a failed run notifies whoever GitHub notifies for failed workflows. Checks 3, 4, 6, 7
+and 8 are not covered.
 
 An end-to-end probe is the strongest signal: periodically send a cheap transaction (for example
 publish a disclosure request from a monitoring wallet) and assert that it appears in the API

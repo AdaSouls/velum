@@ -1,0 +1,33 @@
+# Uptime sample for the preprod deployment, every 5 minutes. Each run's conclusion is one sample:
+# scripts/uptime-report.sh turns the run history into an uptime percentage.
+# GitHub runs schedules on the default branch only, on a best-effort basis (runs can start late
+# or be dropped under load), and disables them after 60 days without repository activity.
+name: Uptime (preprod)
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-preprod
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/uptime-check.sh
+          sparse-checkout-cone-mode: false
+      - name: Check site, API and indexer freshness
+        run: >-
+          scripts/uptime-check.sh preprod
+          https://velum.adasouls.io
+          https://velum-api.adasouls.io
+          5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255

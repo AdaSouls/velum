@@ -10,6 +10,7 @@ Examples use the preprod deployment.
 | Method and path | Purpose |
 |---|---|
 | [`GET /health`](#get-health) | Liveness |
+| [`GET /api/status`](#get-apistatus) | Indexing position |
 | [`GET /api/events`](#get-apievents) | List events |
 | [`GET /api/events/:eventId`](#get-apieventseventid) | One event |
 | [`GET /api/events/:eventId/tokens`](#get-apieventseventidtokens) | An event's tokens |
@@ -143,6 +144,27 @@ curl https://velum-api.adasouls.io/health
 
 ```json
 { "status": "ok" }
+```
+
+---
+
+## `GET /api/status`
+
+Indexing position: the block of the last contract action the indexer applied, and when. Compare
+`lastBlock` with the contract's latest action on Midnight's indexer to tell whether indexing is
+current. A quiet contract keeps an old `lastBlock` and is still healthy.
+
+```bash
+curl https://velum-api.adasouls.io/api/status
+```
+
+```json
+{
+  "networkId": "preprod",
+  "contractAddress": "5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255",
+  "lastBlock": 2886558,
+  "updatedAt": "2026-10-08T05:26:40.000Z"
+}
 ```
 
 ---
