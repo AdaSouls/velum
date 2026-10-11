@@ -21,6 +21,26 @@ export function startApiServer(db: Pool): void {
   // Health
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+  // Indexing position: the block of the last contract action applied. A monitor compares it with
+  // the contract's latest action on Midnight's indexer to tell a stalled indexer from a quiet
+  // contract, which /health cannot do.
+  app.get('/api/status', async (_req, res) => {
+    try {
+      const { rows } = await db.query<{ last_block: string; updated_at: Date | null }>(
+        'SELECT last_block, updated_at FROM indexer_cursor WHERE id = 1',
+      );
+      res.json({
+        networkId: config.networkId,
+        contractAddress: config.contractAddress,
+        lastBlock: Number(rows[0]?.last_block ?? 0),
+        updatedAt: rows[0]?.updated_at?.toISOString() ?? null,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'internal server error' });
+    }
+  });
+
   // POAP routes
   app.use('/api/events', eventsRouter(db));
   app.use('/api/tokens', tokensRouter(db));

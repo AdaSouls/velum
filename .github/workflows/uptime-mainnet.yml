@@ -1,0 +1,33 @@
+# Uptime sample for the mainnet deployment, every 5 minutes. Each run's conclusion is one sample:
+# scripts/uptime-report.sh turns the run history into an uptime percentage.
+# GitHub runs schedules on the default branch only, on a best-effort basis (runs can start late
+# or be dropped under load), and disables them after 60 days without repository activity.
+name: Uptime (mainnet)
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-mainnet
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/uptime-check.sh
+          sparse-checkout-cone-mode: false
+      - name: Check site, API and indexer freshness
+        run: >-
+          scripts/uptime-check.sh mainnet
+          https://mainnet.velum.adasouls.io
+          https://mainnet-api.velum.adasouls.io
+          9b253fc7796e247e98481ef7d4e3eca64b62f9493bafeafcb8d06b889866e029

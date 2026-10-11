@@ -41,6 +41,32 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+  /api/status:
+    get:
+      tags: [health]
+      summary: Indexing position
+      description: >-
+        The block of the last contract action the indexer applied. Compare it with the contract's
+        latest action on Midnight's indexer to tell whether indexing is current.
+      responses:
+        "200":
+          description: The indexing position
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [networkId, contractAddress, lastBlock, updatedAt]
+                properties:
+                  networkId:
+                    type: string
+                  contractAddress:
+                    type: string
+                  lastBlock:
+                    type: integer
+                  updatedAt:
+                    type: string
+                    format: date-time
+                    nullable: true
   /api/events:
     get:
       tags: [events]
