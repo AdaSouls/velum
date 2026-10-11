@@ -33,3 +33,4 @@ Deployed to meet the Catalyst change request. Day-to-day testing stays on prepro
 | Frontend | `https://mainnet.velum.adasouls.io` (Vercel, `velum-app` branch `main`) |
 | Live since | 2026-10-10 |
 | Serving | The contract above |
+| Indexer start block | `MAINNET_START_BLOCK=2949527` (the deployment block) |

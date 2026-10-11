@@ -10,9 +10,11 @@ a safeguard does not exist, this page says so.
 | First run (empty database) | `last_block = 0`, `last_state = NULL` | none | empty ledger |
 | Restart | `last_block = N`, `last_state` set | `{ height: N }` | parsed from `last_state` |
 
-- **There is no configured start block.** On a first run the subscription is opened without an
-  offset and the Midnight indexer delivers the contract's actions from its first one, the
-  deployment. You do not need to know the deployment block.
+- **The start block is optional, except on mainnet.** Without `START_BLOCK`, a first run opens
+  the subscription without an offset and the Midnight indexer delivers the contract's actions
+  from its first one, the deployment. On mainnet that search from genesis never answered
+  (11 Oct 2026, through Blockfrost), so set `START_BLOCK` to the deployment block there. It is
+  only used while the cursor is at 0.
 - **Backfill and live indexing are the same code path.** The subscription replays history and
   then keeps delivering new actions on the same stream. There is no separate backfill job and no
   "caught up" signal.

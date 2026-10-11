@@ -21,8 +21,10 @@ flowchart LR
 | 3. ZK artifacts | The exact build that was deployed | Clients prove with these keys; they must match the verifier keys on-chain. |
 | 4. Web app | The address, the API, the artifacts | It is the only piece users touch; it goes last so it never points at something missing. |
 
-**The indexer needs no start block.** On an empty database it replays the contract's history
-from its deployment. Just give it the address.
+**Give the indexer the deployment block on mainnet.** On an empty database it replays the
+contract's history from its deployment. On preprod the address is enough. On mainnet also set
+`START_BLOCK` (`MAINNET_START_BLOCK` in the production stack) to the deployment block: without
+it the Midnight indexer is asked to search from genesis and never answers.
 
 The indexer and the API are one process and one container, so "deploy the indexer, then the API"
 is a single step.
