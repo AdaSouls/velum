@@ -26,6 +26,7 @@ import * as ledger from "@midnight-ntwrk/ledger-v8";
 import { MidnightBech32m } from "@midnight-ntwrk/wallet-sdk-address-format";
 import { firstValueFrom } from "rxjs";
 import { filter, timeout, throttleTime } from "rxjs/operators";
+import { blockfrostEnvConfig } from "./lib/network.js";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ function parseArgs(): Uint8Array {
   const args = process.argv.slice(2);
 
   if (args.length === 0) {
-    console.error("Usage: register-dust.ts <wallet-seed-hex>");
+    console.error("Usage: BLOCKFROST_PROJECT_ID=<id> register-dust-probe.ts <wallet-seed-hex>");
     console.error("  wallet-seed-hex — 64 hex characters (32 bytes)");
     process.exit(1);
   }
@@ -56,6 +57,16 @@ function parseArgs(): Uint8Array {
 
 async function main() {
   const seed = parseArgs();
+
+  // Midnight's public preprod indexer was decommissioned on 2026-10-09; Blockfrost serves it now.
+  const projectId = process.env.BLOCKFROST_PROJECT_ID ?? "";
+  if (!projectId.startsWith("nightpreprod")) {
+    console.error(
+      'Error: set BLOCKFROST_PROJECT_ID to a Midnight Preprod project id from blockfrost.io (starts with "nightpreprod").'
+    );
+    process.exit(1);
+  }
+  const env = blockfrostEnvConfig("preprod", projectId);
 
   // ─── Step 1: HD derivation ────────────────────────────────────────────────
 
@@ -91,11 +102,11 @@ async function main() {
   const configuration: DefaultConfiguration = {
     networkId: "preprod",
     costParameters: { feeBlocksMargin: 5 },
-    relayURL: new URL("wss://rpc.preprod.midnight.network"),
+    relayURL: new URL(env.nodeWS),
     provingServerUrl: new URL("http://localhost:6300"),
     indexerClientConnection: {
-      indexerHttpUrl: "https://indexer.preprod.midnight.network/api/v4/graphql",
-      indexerWsUrl: "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
+      indexerHttpUrl: env.indexer,
+      indexerWsUrl: env.indexerWS,
     },
     txHistoryStorage: new InMemoryTransactionHistoryStorage(WalletEntrySchema),
   };
