@@ -400,7 +400,7 @@ The indexer database needs no reset. See
 
 | Network | Contract address | Record |
 |---|---|---|
-| Preprod | `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a` | [`deployments/preprod.md`](../../deployments/preprod.md) |
+| Preprod | `5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255` | [`deployments/preprod.md`](../../deployments/preprod.md) |
 | Local devnet | Written by `deploy.ts` on each run | `deployments/undeployed.md` (not committed) |
 
 The deployment record is the source of truth; check it before relying on the address above.

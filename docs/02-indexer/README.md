@@ -19,7 +19,7 @@ queryable copy of part of its public state in Postgres. The same process serves 
 | | |
 |---|---|
 | Contracts | Exactly one: the Velum contract at `CONTRACT_ADDRESS`. One indexer process and one database per contract address. |
-| Preprod address | `fadfffaec26bf23b09de98e9fc3486f5d09589c5de5602af148338f4aead152a` (see [`deployments/preprod.md`](../../deployments/preprod.md)) |
+| Preprod address | `5b019fc6e613a9a591ec84ac3f937674d3c4ceadc8fcd80d7dbe59cbb8ad6255` (see [`deployments/preprod.md`](../../deployments/preprod.md)) |
 | Local devnet address | Whatever `scripts/deploy.ts` printed on the last run |
 | Network | Set by `MIDNIGHT_NETWORK_ID`; it must match the Midnight indexer the process connects to |
 
