@@ -60,9 +60,9 @@ The indexer reads from **Midnight's own indexer** over GraphQL. It does not conn
 | | |
 |---|---|
 | Protocol | GraphQL over WebSocket (`graphql-transport-ws`), library `graphql-ws` 5.16.0 |
-| Endpoint | `MIDNIGHT_INDEXER_WS`, API version 4: `…/api/v4/graphql/ws` |
+| Endpoint | `MIDNIGHT_INDEXER_WS` |
 | Local | `ws://127.0.0.1:8088/api/v4/graphql/ws` (`midnightntwrk/indexer-standalone:4.3.3` from `devnet.yml`) |
-| Preprod | `wss://indexer.preprod.midnight.network/api/v4/graphql/ws` |
+| Preprod | `wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=…` (Blockfrost; `deploy/production/docker-compose.yml` builds it from `BLOCKFROST_PROJECT_ID`) |
 | Mode | One long-lived **subscription**. No polling and no one-off queries. |
 
 `MIDNIGHT_INDEXER_URL` (the HTTP endpoint) is read into the configuration but not used by the
