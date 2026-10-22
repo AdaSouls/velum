@@ -2,8 +2,15 @@ import { WebSocket } from 'ws';
 globalThis.WebSocket = WebSocket;
 import { createClient } from 'graphql-ws';
 
+// Midnight's public preprod indexer was decommissioned on 2026-10-09; Blockfrost serves it now.
+const projectId = process.env.BLOCKFROST_PROJECT_ID ?? '';
+if (!projectId.startsWith('nightpreprod')) {
+  console.error('Set BLOCKFROST_PROJECT_ID to a Midnight Preprod project id from blockfrost.io (starts with "nightpreprod").');
+  process.exit(1);
+}
+
 const client = createClient({
-  url: 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
+  url: `wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=${projectId}`,
   shouldRetry: () => false,
   keepAlive: 15_000,
   on: {

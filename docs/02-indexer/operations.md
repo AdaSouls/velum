@@ -25,7 +25,7 @@ Per environment:
 | | Local devnet | Preprod (production host) |
 |---|---|---|
 | `MIDNIGHT_NETWORK_ID` | `undeployed` | `preprod` |
-| `MIDNIGHT_INDEXER_WS` | `ws://127.0.0.1:8088/api/v4/graphql/ws` | `wss://indexer.preprod.midnight.network/api/v4/graphql/ws` |
+| `MIDNIGHT_INDEXER_WS` | `ws://127.0.0.1:8088/api/v4/graphql/ws` | `wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=…`, built by the compose file from `BLOCKFROST_PROJECT_ID` |
 | `CONTRACT_ADDRESS` | from `deployments/undeployed.md` | from `deployments/preprod.md` |
 | Database | `poap-pg` from `devnet.yml`, port 5434 | `postgres` service, internal network only |
 
