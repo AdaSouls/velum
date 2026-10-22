@@ -19,9 +19,7 @@ the wallet was still catching up; the retry, with the wallet at the head, went t
 Adds multi-condition credential requests and atomic re-issue
 (see [changelog](../docs/01-contract/changelog.md)).
 
-**Not live yet.** The API host and the frontend still follow the contract below. Switching them
-is a coordinated step, see [Deploying](../docs/04-operations/deploy.md): the frontend needs a
-build for this contract first (its request, proof and re-issue calls changed).
+**Live.** The API host and the frontend serve this contract (checked 2026-10-22, see below).
 
 ## API host
 
@@ -29,17 +27,18 @@ build for this contract first (its request, proof and re-issue calls changed).
 |---|---|
 | API | `https://velum-api.adasouls.io` (Caddy + indexer + Postgres, `deploy/production/`) |
 | Frontend | `https://velum.adasouls.io` (Vercel, `poap-frontend` branch `feature/production`) |
-| Deployed commit | `8d628bc` (`4ac002a` plus the Caddyfile route for credential update requests) |
 | Live since | 2026-09-25 |
-| Serving | The **previous** contract, `fadfffae…152a`, since 2026-10-07 |
+| Serving | The contract above, `5b019fc6…6255` |
 
-To move the host to the contract above: check out the matching commit, set the new
-`CONTRACT_ADDRESS`, reset the database, and publish the 22 circuits' ZK artifacts at
-`/zk/poap/` (`deploy/production/sync-zk.sh`, then `rsync`).
+Checked from outside on 2026-10-22: the frontend bundle at `https://velum.adasouls.io` contains
+`5b019fc6…6255` and none of the earlier addresses; the API indexed that day's test transactions,
+answers `/api/credential-requests`, and serves the `reissueCredential` verifier key at `/zk/poap/`
+while `proveCredentialAttribute` (removed in this build) returns 404. The exact commit deployed on
+the host was not checked.
 
-## Previous deployment (still served by the API host and the frontend)
+## Previous deployment (replaced)
 
-Being replaced because multi-condition credential requests and atomic re-issue added a ledger
+Replaced because multi-condition credential requests and atomic re-issue added a ledger
 field and changed the circuits (see [changelog](../docs/01-contract/changelog.md)).
 
 | Field | Value |
